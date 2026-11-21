@@ -12,6 +12,7 @@ from plausibility import Vote, decide, phone_has_enough_digits, within_opening_d
 from repair import handle_key, next_step                      # noqa: E402
 from say_it import number_words, say_it                       # noqa: E402
 from stopwatch import Stopwatch                               # noqa: E402
+from turn import Call                                         # noqa: E402
 
 
 class SayIt(unittest.TestCase):
@@ -142,6 +143,44 @@ class StopwatchAndFillers(unittest.TestCase):
         self.assertTrue(all(a != b for a, b in zip(said, said[1:])))
         self.assertIsNone(f.holding("diary", expected_wait_ms=200))
         self.assertIsNotNone(f.holding("diary", expected_wait_ms=1500))
+
+
+class Turn(unittest.TestCase):
+    def test_clear_line_carries_on(self):
+        out = Call("au").hear([("thursday at two", 0.9)], brain_reading="thursday at two")
+        self.assertEqual((out.action, out.say, out.meaning), ("act", None, "thursday at two"))
+
+    def test_unsure_reads_back_then_yes(self):
+        call = Call("au")
+        out = call.hear([("thursday arvo at two", 0.5), ("tuesday arvo at two", 0.45)])
+        self.assertEqual(out.action, "confirm")
+        self.assertIn("thursday afternoon at two", out.say)
+        out = call.hear([("nah yeah", 0.9)])
+        self.assertEqual((out.action, out.meaning, call.misses), ("act", "thursday afternoon at two", 0))
+
+    def test_full_ladder_to_keypad_and_message(self):
+        call = Call("au")
+        self.assertEqual(call.hear([("mumble", 0.2)]).action, "ask_again")
+        self.assertEqual(call.hear([("thursday at ten", 0.3), ("tuesday at two", 0.28), ("thursday at two", 0.2)]).action, "read_back")
+        out = call.hear([("no", 0.9)])
+        self.assertEqual(out.action, "keypad")
+        self.assertNotIn("thursday at ten", out.say)
+        self.assertEqual(call.press("9").action, "keypad")
+        self.assertEqual(call.press("3").action, "take_message")
+
+    def test_keypad_choice(self):
+        call = Call("au")
+        call.hear([("mumble", 0.2)])
+        call.hear([("thursday at ten", 0.3), ("tuesday at two", 0.28)])
+        call.hear([("nope", 0.9)])
+        out = call.press("1")
+        self.assertEqual((out.action, out.meaning), ("act", "tuesday at two"))
+
+    def test_only_casual_after_caller_is(self):
+        call = Call("au")
+        self.assertEqual(call.ok(), "Of course.")
+        call.hear([("too easy, cheers", 0.9)])
+        self.assertIn(call.ok(), ["No worries.", "Too easy.", "Easy done."])
 
 
 if __name__ == "__main__":

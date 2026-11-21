@@ -30,5 +30,9 @@ Models must be downloaded first. Use the `mila-models` skill.
 2. Run each through Moonshine streaming (CPU) and Nemotron streaming (GPU).
 3. Record: words wrong per 100, delay before the words appear, and how it copes when someone talks over Mila.
 
+## Scoring the listening test
+Save what was really said and what each model heard in one file, then run
+`python3 scripts/listening_score.py results.jsonl`. It prints, for each model, words wrong per 100, how often the important details (names, numbers, street names) came through intact, and the average delay. The file format is at the top of the script. Details kept matters more than overall word accuracy: a wrong street name costs a job, a missed "um" costs nothing.
+
 ## What to report
 One short table per test with a clear pick, then one line on the next step. Save the full results in the run folder.

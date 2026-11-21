@@ -23,6 +23,8 @@ Each part ("node") is one small file that does one job, has no dependencies, and
 | Mila replies | `nodes/say_it.py` | Turns "0412 345 678", "$85", "2:30pm" and "3/14 Smith St" into the words a person would say, just before the voice reads them. |
 | Every turn | `nodes/stopwatch.py` | Times hearing, thinking and speaking against limits, and flags the slow step. |
 
+`nodes/turn.py` joins them into one step of a call, text in and text out, so the whole conversation logic can be tried without any voice models. Run `python3 nodes/turn.py` to read through a practice call that goes from a clear line to a bad one and ends on the keypad.
+
 Run any node by itself to see it work: `python3 nodes/say_it.py`.
 Run all checks: `python3 tests/test_nodes.py`.
 
