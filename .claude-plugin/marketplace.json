@@ -40,8 +40,7 @@
         "./skills/web-artifacts-builder",
         "./skills/webapp-testing"
       ]
-    }
-    ,
+    },
     {
       "name": "claude-api",
       "description": "Claude API and SDK documentation skill for building LLM-powered applications",
@@ -67,6 +66,18 @@
       "strict": false,
       "skills": [
         "./skills/discernment-nudge"
+      ]
+    },
+    {
+      "name": "my-skills",
+      "description": "Our own skills for Mila AI: getting the models from Hugging Face and GitHub, voice testing, the brain, and plain-words house rules",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./my-skills/mila-models",
+        "./my-skills/mila-voice-test",
+        "./my-skills/mila-brain",
+        "./my-skills/owner-plain-words"
       ]
     }
   ]
