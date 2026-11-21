@@ -77,7 +77,8 @@
         "./my-skills/mila-models",
         "./my-skills/mila-voice-test",
         "./my-skills/mila-brain",
-        "./my-skills/owner-plain-words"
+        "./my-skills/owner-plain-words",
+        "./my-skills/mila-conversation"
       ]
     }
   ]
