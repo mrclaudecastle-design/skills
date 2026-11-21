@@ -2,7 +2,8 @@
 """Download Mila's models from Hugging Face into one folder.
 
 Safe by design: it only adds files. It never deletes, moves or overwrites
-anything, and it skips models that are already downloaded.
+anything. Run it again after a stalled download and it picks up where
+it stopped; files that already finished are left alone.
 
 Usage:
   python3 download_models.py --list
@@ -55,10 +56,10 @@ def main():
 
     for repo_id in wanted:
         target = dest / repo_id.replace("/", "__")
-        if target.exists() and any(target.iterdir()):
-            print(f"skip  {repo_id} (already in {target})")
-            continue
-        print(f"get   {repo_id} -> {target}")
+        # snapshot_download resumes half-finished downloads and leaves
+        # finished files alone, so a re-run is always safe.
+        state = "resume" if target.exists() and any(target.iterdir()) else "get"
+        print(f"{state:6}{repo_id} -> {target}")
         try:
             snapshot_download(repo_id=repo_id, local_dir=str(target))
         except Exception as e:  # keep going with the rest

@@ -23,7 +23,7 @@ The full list, with licences, is in `models.json` next to this file:
 2. Check where Qwen already lives on the Mac before getting it again. Search the usual places (`~/.cache/huggingface`, `~/.ollama`, `~/.lmstudio`) and reuse it if found.
 3. Download, starting with the small voice and listening models:
    `python3 scripts/download_models.py --group voice_out ears --dest ~/MilaModels`
-   Add `brain` only if Qwen isn't already there. The script skips anything already downloaded and checks there's enough free disk first.
+   Add `brain` only if Qwen isn't already there. If a download stalls, stop it with Ctrl+C and run the same command again: it picks up where it stopped. It checks there's enough free disk first.
 4. Install the libraries in a separate Python environment so nothing else on the Mac changes:
    ```
    python3 -m venv ~/MilaModels/.venv && source ~/MilaModels/.venv/bin/activate
