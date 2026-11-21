@@ -33,6 +33,6 @@ The full list, with licences, is in `models.json` next to this file:
 6. Tell the owner in one or two lines what was added and where.
 
 ## Watch out for
-- The **Nemotron** licence isn't a standard open licence. Read it before using Mila with paying customers.
+- **Nemotron** is under the OpenMDW 1.1 open model licence and its page says it is ready for commercial use. Skim the terms at https://openmdw.ai/license/1-1/ before launch.
 - The Phonon German, French and Spanish versions are non-commercial. Use only `phonon-31m-en`.
 - A model page can change. If an id stops working, search Hugging Face for the name and update `models.json`.

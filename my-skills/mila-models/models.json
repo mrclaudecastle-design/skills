@@ -13,7 +13,7 @@
     "ears": [
       {"id": "moonshine-ai/moonshine-streaming-medium", "role": "live listening on CPU", "license": "mit"},
       {"id": "moonshine-ai/moonshine-streaming-small", "role": "live listening, lighter", "license": "mit"},
-      {"id": "nvidia/nemotron-3.5-asr-streaming-0.6b", "role": "live listening on GPU (works with Pipecat)", "license": "other (NVIDIA licence, read before commercial use)"}
+      {"id": "nvidia/nemotron-3.5-asr-streaming-0.6b", "role": "live listening on GPU (works with Pipecat)", "license": "openmdw-1.1 (open model licence; model page says ready for commercial use; terms at https://openmdw.ai/license/1-1/)"}
     ]
   },
   "github": [
