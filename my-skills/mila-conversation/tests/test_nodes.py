@@ -12,6 +12,7 @@ from plausibility import Vote, decide, phone_has_enough_digits, within_opening_d
 from repair import handle_key, next_step                      # noqa: E402
 from say_it import number_words, say_it                       # noqa: E402
 from stopwatch import Stopwatch                               # noqa: E402
+from shop_card import ShopCard                                # noqa: E402
 from turn import Call                                         # noqa: E402
 
 
@@ -181,6 +182,54 @@ class Turn(unittest.TestCase):
         self.assertEqual(call.ok(), "Of course.")
         call.hear([("too easy, cheers", 0.9)])
         self.assertIn(call.ok(), ["No worries.", "Too easy.", "Easy done."])
+
+
+class Shop(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def card(self, **extra):
+        return ShopCard({"shop_name": "Birch and Co", "trade": "plumber", "owner_name": "Dave", "country": "au", **extra})
+
+    def test_example_is_ready(self):
+        card = ShopCard.load(self.ROOT / "shop" / "examples" / "birch-and-co.json")
+        self.assertEqual(card.missing(), [])
+        text = card.instructions()
+        for needle in ("Birch and Co Plumbing", "Dave", "call-out fee $90", "Does not do: roofing", "book jobs into the diary"):
+            self.assertIn(needle, text)
+
+    def test_four_answers_are_enough(self):
+        card = self.card()
+        self.assertEqual(card.missing(), [])
+        text = card.instructions()
+        self.assertIn("You have no prices", text)
+        self.assertIn("You don't book jobs", text)
+        self.assertEqual(card.greeting(), "Birch and Co, this is Mila. How can I help?")
+
+    def test_missing_and_bad_answers_are_named_in_plain_words(self):
+        card = ShopCard({"shop_name": "Birch and Co", "country": "nz"})
+        missing = card.missing()
+        self.assertIn("What do you do, in a few words?", missing)
+        self.assertTrue(any("Which country" in m for m in missing))
+        with self.assertRaises(ValueError):
+            card.instructions()
+
+    def test_card_drives_the_call(self):
+        call = Call(card=self.card(open_days=["monday", "tuesday"]))
+        out = call.hear([("sunday at two", 0.6), ("monday at two", 0.5), ("monday at two", 0.5)])
+        self.assertEqual(out.meaning, "monday at two")
+
+    def test_training_calls_use_the_card(self):
+        sys.path.insert(0, str(self.ROOT / "finetune"))
+        from make_seed_data import make
+        rows = make(120, seed=3)
+        self.assertEqual(len(rows), 120)
+        for row in rows:
+            system = row["messages"][0]["content"]
+            self.assertIn("About this business:", system)
+            self.assertEqual(row["messages"][-1]["role"], "assistant")
+            said = " ".join(m["content"] for m in row["messages"][1:] if m["role"] == "assistant")
+            if "$" in said and "0412" not in said:
+                self.assertIn("Prices you may say", system)
 
 
 if __name__ == "__main__":

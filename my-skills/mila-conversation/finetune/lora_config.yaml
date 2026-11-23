@@ -9,7 +9,7 @@
 model: ../../../../Qwen3-8B-mlx-4bit   # the converted copy, see README step 1
 train: true
 fine_tune_type: lora
-data: data                  # folder holding train.jsonl and valid.jsonl
+data: data-v2               # folder holding train.jsonl and valid.jsonl (v2 follows each shop's card)
 seed: 7
 
 num_layers: 8               # how much of the model is taught; raise to 16 if memory allows

@@ -4,7 +4,8 @@
 Every call is made up (no real customer data). They teach the habits:
 short spoken replies, one question at a time, understanding local talk
 and going along with it without starting it, reading details back, and
-never inventing prices or promises.
+never inventing prices or promises, and following each shop's own
+answers (its questionnaire card) for days, prices and what it does.
 
 These are seeds. A few hundred templated calls teach the style; widen them
 with a stronger model before a serious training run.
@@ -15,7 +16,11 @@ with a stronger model before a serious training run.
 import argparse
 import json
 import random
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "nodes"))
+from shop_card import ShopCard   # noqa: E402
 
 SHOPS = {
     "au": [("Birch and Co Plumbing", "plumber", "Dave"), ("Kingsley Electrical", "electrician", "Sam"),
@@ -45,13 +50,18 @@ THANKS = {"au": ["Cheers mate.", "Too easy, ta.", "Beauty, thanks heaps."], "ca"
 PLAIN_THANKS = ["Thank you.", "Great, thanks.", "That's perfect, thank you."]
 
 
-def system_prompt(shop, trade, owner, country):
-    place = {"au": "Australia", "ca": "Canada"}[country]
-    return (f"You are Mila, the receptionist for {shop}, a {trade} in {place}. {owner} is on a job and can't answer. "
-            "You are on a live phone call, so speak the way people talk: one or two short sentences, one question at a time, no lists. "
-            "Understand everyday local expressions and go along with them warmly, but don't start using slang yourself. "
-            "Read names, numbers, days and times back to confirm them. Never invent a price, a time or a promise. "
-            f"If you don't know, say so and offer to have {owner} call back.")
+WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday"]
+FEES = {"au": "$90", "ca": "$110"}
+
+
+def make_card(r, c, shop, trade, owner, **overrides) -> ShopCard:
+    """A made-up shop's questionnaire answers. Calls must agree with the card."""
+    answers = {"shop_name": shop, "trade": trade, "owner_name": owner, "country": c,
+               "open_days": WEEKDAYS + (["saturday"] if r.random() < 0.25 else []),
+               "open_hours": r.choice(["7am to 4pm", "8am to 5pm", "7:30am to 3:30pm"]),
+               "services": PROBLEMS[trade], "bookings": "book"}
+    answers.update(overrides)
+    return ShopCard(answers)
 
 
 def call_booking(r, c, shop, trade, owner):
@@ -113,13 +123,55 @@ def call_readback(r, c, shop, trade, owner):
 
 
 def call_out_of_scope(r, c, shop, trade, owner):
-    return [("user", "Do you guys do roofing as well?" if trade != "carpenter" else "Do you guys do tiling as well?"),
+    """Something the card doesn't mention: she doesn't guess."""
+    return [("user", "Do you guys do paving as well?"),
             ("assistant", f"I'm not sure, to be honest, and I'd hate to tell you wrong. I can ask {owner} and have them call you back. Would that help?"),
             ("user", "Yeah, that'd be good." if c == "au" else "Yeah, that'd be great."),
             ("assistant", "No problem. What's your name and the best number?")]
 
 
-CALLS = [(call_booking, 5), (call_no_means_no, 2), (call_price_unknown, 2), (call_misheard, 1), (call_readback, 2), (call_out_of_scope, 1)]
+def call_not_offered(r, c, shop, trade, owner):
+    """Something the card says they don't do: she says so kindly."""
+    thing = "tiling" if trade == "carpenter" else "roofing"
+    return ({"not_offered": [thing, "asbestos removal"]},
+            [("user", f"Do you guys do {thing} as well?"),
+             ("assistant", f"Sorry, {thing} isn't something {owner} does. Is there anything else I can help with?"),
+             ("user", "Nah, that was it, cheers." if c == "au" else "No, that was it, thanks."),
+             ("assistant", "No worries, thanks for calling." if c == "au" else "No problem, thanks for calling.")])
+
+
+def call_price_allowed(r, c, shop, trade, owner):
+    """The card lists one price: she says that one and no others."""
+    fee, thing = FEES[c], r.choice(PROBLEMS[trade])
+    return ({"prices": {"call-out fee": fee}},
+            [("user", f"What do you charge to come and look at my {thing}?"),
+             ("assistant", f"The call-out fee is {fee}. Anything beyond that depends on what {owner} finds, so they'd tell you before starting."),
+             ("user", "And how much to fix it, roughly?"),
+             ("assistant", f"I can't give you a figure for that, sorry, I'd only be guessing. {owner} can give you a proper price once they've seen it. Would you like to book a time?")])
+
+
+def call_closed_day(r, c, shop, trade, owner):
+    """Asked for a day the card says they don't work."""
+    day, time = r.choice([s for s in SLOTS if s[0] in ("Monday", "Wednesday", "Friday")])
+    return ({"open_days": WEEKDAYS},
+            [("user", "Any chance someone could come out Sunday?"),
+             ("assistant", f"Sorry, {owner} doesn't work Sundays. The next spot is {day} at {time}. Would that suit?"),
+             ("user", "Yeah, righto, that'll do." if c == "au" else "Sure, that works."),
+             ("assistant", f"Great, I'll put you down for {day} at {time}. Can I get your name?")])
+
+
+def call_message_only(r, c, shop, trade, owner):
+    """The card says take messages, don't book."""
+    name, thing = r.choice(NAMES), r.choice(PROBLEMS[trade])
+    return ({"bookings": "message"},
+            [("user", f"Hi, can I book someone in to look at my {thing}?"),
+             ("assistant", f"I can't book it in myself, but I'll get {owner} to call you back and sort out a time. Can I grab your name?"),
+             ("user", f"It's {name}."),
+             ("assistant", f"Thanks {name}. And what's the best number for {owner} to call?")])
+
+
+CALLS = [(call_booking, 5), (call_no_means_no, 2), (call_price_unknown, 2), (call_misheard, 1), (call_readback, 2),
+         (call_out_of_scope, 1), (call_not_offered, 2), (call_price_allowed, 2), (call_closed_day, 2), (call_message_only, 2)]
 
 
 def make(count: int, seed: int = 7, au_share: float = 0.75):
@@ -129,12 +181,14 @@ def make(count: int, seed: int = 7, au_share: float = 0.75):
     while len(rows) < count:
         c = "au" if r.random() < au_share else "ca"
         shop, trade, owner = r.choice(SHOPS[c])
-        turns = r.choice(makers)(r, c, shop, trade, owner)
+        made = r.choice(makers)(r, c, shop, trade, owner)
+        overrides, turns = made if isinstance(made, tuple) else ({}, made)
+        card = make_card(r, c, shop, trade, owner, **overrides)
         key = shop + json.dumps(turns)
         if key in seen:
             continue
         seen.add(key)
-        rows.append({"messages": [{"role": "system", "content": system_prompt(shop, trade, owner, c)}]
+        rows.append({"messages": [{"role": "system", "content": card.instructions()}]
                      + [{"role": role, "content": text} for role, text in turns]})
     return rows
 

@@ -17,10 +17,12 @@ That needs about 5 GB of free disk. Check space first.
 
 ## 2. Make the starter calls
 
-    python3 make_seed_data.py --out data --count 300
+    python3 make_seed_data.py --out data-v3 --count 400
 
-This writes `data/train.jsonl` and `data/valid.jsonl`. It refuses to write over
-an existing folder, so use a new `--out` name each time.
+It refuses to write over an existing folder, so use a new `--out` name each time.
+Two sets are already here: `data/` (the first 300, plain instructions) and `data-v2/`
+(400 calls where every shop has its own questionnaire card, and Mila follows it for
+days, prices, bookings and what the shop does). Train on `data-v2`.
 
 ## 3. Train
 
@@ -41,7 +43,7 @@ Compare the same lines with and without `--adapter-path` before keeping a run.
 ## Good to know
 - **Thinking mode:** Qwen 3 can "think out loud" before answering, which adds delay
   on a call. Turn it off for voice (see the Qwen model page for the current switch).
-- **300 templated calls is a seed, not a finished set.** They repeat patterns. Before a
+- **A few hundred templated calls is a seed, not a finished set.** They repeat patterns. Before a
   serious run, have a stronger model write a few thousand varied calls in the same format,
   and check a sample by hand.
 - **Real calls** go in only under the privacy rules in the `mila-brain` skill.

@@ -20,6 +20,7 @@ Each part ("node") is one small file that does one job, has no dependencies, and
 | Deciding what was meant | `nodes/plausibility.py` | Several voters (the ears' top guesses, the brain's reading, plain rules) vote. Sanity checks knock out nonsense, like a day the shop is closed. Returns the winner, how sure she is, and `act`, `confirm` or `repair`. |
 | Not sure | `nodes/repair.py` | The second approach. Miss 1: say her best guess back. Miss 2: "press 1 for Thursday at two, press 2 for Tuesday at two". Miss 3: take a message and promise a call back. |
 | Waiting | `nodes/fillers.py` | Listening sounds ("mm-hm") and holding lines ("let me check the diary"), never the same twice in a row. |
+| New shop joins | `nodes/shop_card.py` | Turns the shop's answered questionnaire into Mila's instructions, greeting and checks. No training needed. |
 | Mila replies | `nodes/say_it.py` | Turns "0412 345 678", "$85", "2:30pm" and "3/14 Smith St" into the words a person would say, just before the voice reads them. |
 | Every turn | `nodes/stopwatch.py` | Times hearing, thinking and speaking against limits, and flags the slow step. |
 
@@ -27,6 +28,15 @@ Each part ("node") is one small file that does one job, has no dependencies, and
 
 Run any node by itself to see it work: `python3 nodes/say_it.py`.
 Run all checks: `python3 tests/test_nodes.py`.
+
+## Plug and play: one Mila, a card per shop
+Mila is trained once, as a receptionist. A new shop does not get its own training. It answers a short questionnaire (`shop/questionnaire.json`, 14 plain-word questions, only 4 of them required) and `nodes/shop_card.py` turns the answers into everything that changes per shop: her instructions, the greeting, the country for lingo, and sanity checks such as the days the shop works. Everything unanswered gets a safe default, for example no prices means she never quotes one.
+
+    card = ShopCard.load("shop/examples/birch-and-co.json")
+    card.missing()                 # what's still needed, in the owner's words
+    call = Call(card=card)         # the whole call now follows this shop's answers
+
+The training calls in `finetune/data-v2` each carry a different shop's card, so the brain learns to follow whatever card it is given rather than memorising one shop. Shop-specific tweaks go in the card; receptionist manners go in training.
 
 ## How sure is sure enough
 `plausibility.py` uses two lines: at 0.80 or above she carries on, from 0.50 she reads it back first, below that she goes to the repair ladder. A reading backed by only one voter is never treated as certain. Tune these from real calls, not by feel.

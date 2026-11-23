@@ -33,8 +33,11 @@ class Out:
 
 
 class Call:
-    def __init__(self, country: str = "au", checks=()):
-        self.country, self.checks = country, list(checks)
+    def __init__(self, country: str = "au", checks=(), card=None):
+        # Pass a ShopCard and the country and sanity checks come from the shop's own answers.
+        self.country = card.country if card else country
+        self.checks = list(checks) + (card.checks() if card else [])
+        self.card = card
         self.misses = 0             # misunderstandings in a row on the current detail
         self.caller_casual = False  # has the caller used everyday local talk yet?
         self.pending = None         # a reading waiting for a yes or no

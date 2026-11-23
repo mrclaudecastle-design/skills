@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""shop_card: turn a new shop's answered questionnaire into a ready Mila.
+
+One Mila, trained once as a receptionist. Each shop is a small card of
+answers, not a new training run. This node reads the answers, fills the
+gaps with safe defaults, and produces what the rest of the kit needs:
+her instructions for this shop, the greeting, the country for lingo, and
+the sanity checks for the voting node (such as the days the shop works).
+
+    from shop_card import ShopCard
+    card = ShopCard.load("shop/examples/birch-and-co.json")
+    card.missing()        -> []            (anything she can't start without)
+    card.instructions()   -> the text given to the brain for every call
+    card.checks()         -> [checks for plausibility.decide]
+"""
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from plausibility import within_opening_days   # noqa: E402
+
+QUESTIONS = json.loads((Path(__file__).resolve().parent.parent / "shop" / "questionnaire.json").read_text())["questions"]
+COUNTRIES = {"au": "Australia", "ca": "Canada"}
+
+# The receptionist manners every shop gets. This is the part she is trained on.
+MANNERS = ("You are on a live phone call, so speak the way people talk: one or two short sentences, "
+           "one question at a time, no lists. Understand everyday local expressions and go along with them warmly, "
+           "but don't start using slang yourself. Read names, numbers, days and times back to confirm them. "
+           "Never invent a price, a time or a promise.")
+
+
+def _listed(items) -> str:
+    items = [str(i) for i in items]
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+class ShopCard:
+    def __init__(self, answers: dict):
+        self.given = {k: v for k, v in answers.items() if v not in (None, "", [], {})}
+        self.a = {q["id"]: q["default"] for q in QUESTIONS if "default" in q}
+        self.a.update(self.given)
+
+    @classmethod
+    def load(cls, path):
+        return cls(json.loads(Path(path).read_text()))
+
+    def missing(self) -> list[str]:
+        """Questions that must be answered before Mila can take calls, in the owner's words."""
+        problems = [q["ask"] for q in QUESTIONS if q.get("need") and q["id"] not in self.given]
+        for q in QUESTIONS:
+            value = self.given.get(q["id"])
+            if value is not None and "choices" in q and value not in q["choices"]:
+                problems.append(f"{q['ask']} (pick one of: {', '.join(q['choices'])})")
+        return problems
+
+    @property
+    def country(self) -> str:
+        return self.a.get("country", "au")
+
+    def greeting(self) -> str:
+        return self.a["greeting"].format(shop_name=self.a.get("shop_name", ""))
+
+    def checks(self) -> list:
+        """Sanity checks for the voting node, built from this shop's answers."""
+        days = {d.lower() for d in self.a.get("open_days", [])}
+        return [within_opening_days(days)] if days else []
+
+    def instructions(self) -> str:
+        if self.missing():
+            raise ValueError("Not ready: " + "; ".join(self.missing()))
+        a, owner = self.a, self.a["owner_name"]
+        lines = [f"You are Mila, the receptionist for {a['shop_name']}, a {a['trade']} in {COUNTRIES.get(self.country, self.country)}. "
+                 f"{owner} is on a job and can't answer.", MANNERS,
+                 f"If you don't know, say so and offer to have {owner} call back.", "", "About this business:"]
+        if a.get("area"):
+            lines.append(f"- Covers: {a['area']}.")
+        lines.append(f"- Works {_listed(a['open_days'])}, {a['open_hours']}. Never offer a time outside these.")
+        if a.get("services"):
+            lines.append(f"- Main jobs: {_listed(a['services'])}.")
+        if a.get("not_offered"):
+            lines.append(f"- Does not do: {_listed(a['not_offered'])}. Say so kindly.")
+        if a.get("prices"):
+            lines.append("- Prices you may say, and no others: " + "; ".join(f"{k} {v}" for k, v in a["prices"].items()) + ".")
+        else:
+            lines.append(f"- You have no prices. For any price question, offer a call back from {owner}.")
+        lines.append("- You can book jobs into the diary." if a["bookings"] == "book"
+                     else f"- You don't book jobs. Take the caller's name, number and what they need, and say {owner} will call back.")
+        lines.append(f"- Urgent calls: {a['emergencies']}")
+        if a.get("extra"):
+            lines.append(f"- Also: {a['extra']}")
+        return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    here = Path(__file__).resolve().parent.parent
+    card = ShopCard.load(sys.argv[1] if len(sys.argv) > 1 else here / "shop" / "examples" / "birch-and-co.json")
+    print("Still needed:", card.missing() or "nothing, ready to take calls")
+    print("Greeting:", card.greeting(), "\n")
+    print(card.instructions())
