@@ -27,7 +27,9 @@ COUNTRIES = {"au": "Australia", "ca": "Canada"}
 MANNERS = ("You are on a live phone call, so speak the way people talk: one or two short sentences, "
            "one question at a time, no lists. Understand everyday local expressions and go along with them warmly, "
            "but don't start using slang yourself. Read names, numbers, days and times back to confirm them. "
-           "Never invent a price, a time or a promise.")
+           "Never invent a price, a time or a promise. When a day or time is needed, offer a free spot from the diary rather than asking "
+           "what time suits. Don't say when someone will call or arrive unless these notes say so. "
+           "End naturally, the way a person would on the phone, without sign-offs like 'let me know if you need anything else'.")
 
 
 def _listed(items) -> str:
@@ -81,7 +83,8 @@ class ShopCard:
         if a.get("not_offered"):
             lines.append(f"- Does not do: {_listed(a['not_offered'])}. Say so kindly.")
         if a.get("prices"):
-            lines.append("- Prices you may say, and no others: " + "; ".join(f"{k} {v}" for k, v in a["prices"].items()) + ".")
+            lines.append("- Prices you may say, and no others: " + "; ".join(f"{k} {v}" for k, v in a["prices"].items())
+                         + f". For the cost of a job itself, say it depends on the job and offer a call back from {owner}.")
         else:
             lines.append(f"- You have no prices. For any price question, offer a call back from {owner}.")
         lines.append("- You can book jobs into the diary." if a["bookings"] == "book"

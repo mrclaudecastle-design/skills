@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "nodes"))
-from guard import PHONE, guard          # noqa: E402
+from guard import PHONE, guard, is_urgent   # noqa: E402
 from lingo import understand            # noqa: E402
 from shop_card import ShopCard          # noqa: E402
 
@@ -64,7 +64,7 @@ def main():
 
     results, fixes, lines = [], Counter(), [f"Model: {args.model}  adapter: {args.adapter_path}  load: {load_s:.1f}s", "", system, ""]
     for name, caller_lines in CALLS.items():
-        messages, have_number = [{"role": "system", "content": system}], False
+        messages, have_number, urgent = [{"role": "system", "content": system}], False, False
         lines.append(f"=== {name} ===")
         for said in caller_lines:
             messages.append({"role": "user", "content": said})
@@ -77,7 +77,8 @@ def main():
             secs = time.perf_counter() - t
             if "</think>" in brain:                      # in case thinking could not be switched off
                 brain = brain.split("</think>")[-1].strip()
-            g = guard(brain, said, card, DIARY, have_number)
+            urgent = urgent or is_urgent(said)
+            g = guard(brain, said, card, DIARY, have_number, urgent)
             have_number = have_number or bool(PHONE.search(said))
             fixes.update(g.fixes)
             messages.append({"role": "assistant", "content": g.text})   # the call continues with what she really said

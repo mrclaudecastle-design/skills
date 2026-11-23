@@ -273,7 +273,7 @@ class Guard(unittest.TestCase):
     def test_run_02_misses_are_caught(self):
         out = self.g("I'll pass your call to Dave.", "Can you get Dave to call me back? It's Bec, 0412 345 678.")
         self.assertEqual(out.fixes, ["read_back"])
-        self.assertTrue(out.text.endswith("Just to check, that's 0412 345 678?"))
+        self.assertEqual(out.text, "So that's Bec on 0412 345 678. I'll pass your call to Dave.")
         out = self.g("That's an emergency. I'll get Dave to call you back now.", "There's water pouring through my ceiling!")
         self.assertEqual(out.fixes, ["need_number"])
         self.assertIn("best number", out.text)
@@ -302,13 +302,40 @@ class Guard(unittest.TestCase):
         out = self.g("Dave will be there within ten minutes.", have_number=True)
         self.assertEqual(out.fixes, ["deadline"])
         self.assertIn("as soon as possible", out.text)
-        self.assertEqual(self.g("Dave will ring within fifteen minutes.", have_number=True).fixes, [])   # card allows it
+        # The card promises fifteen minutes, but only for urgent calls.
+        self.assertEqual(self.g("Dave will ring within fifteen minutes.", "There's water pouring through my ceiling!", have_number=True).fixes, [])
+        self.assertEqual(self.g("Dave will ring within fifteen minutes.", "It's about a leaking tap.", have_number=True).fixes, ["deadline"])
         out = self.g("We do:\n- blocked drains\n- **hot water**\n- taps")
         self.assertIn("speech_only", out.fixes)
         self.assertNotRegex(out.text, r"[*\n-] ")
         out = self.g("One. Two. Three. Four. Would Tuesday suit?")
         self.assertIn("too_long", out.fixes)
         self.assertTrue(out.text.endswith("Would Tuesday suit?"))
+
+    def test_live_01_slips_are_caught(self):
+        """Real replies from the first live run on the Mac (untrained Qwen, 23 Nov 2026)."""
+        out = self.g("Thanks, Linda. I've noted your details. Dave will call you to confirm the time. Is there anything else I can assist with?",
+                     "My name is Linda Park and the number is 0498 111 222.")
+        self.assertTrue(out.text.startswith("So that's Linda Park on 0498 111 222. "))
+        self.assertIn("Dave will call you to confirm the time.", out.text)
+        self.assertEqual(out.text.count("?"), 1)
+        out = guard("Great, Friday works. What time this week?", "Yes, Friday is fine.", self.card,
+                    [("Tuesday", "9:30am"), ("Thursday", "2:00pm"), ("Friday", "11:00am")])
+        self.assertEqual((out.fixes, out.text), (["offer_spot"], "Great, Friday works. I have Friday at 11:00am. Would that suit?"))
+        out = self.g("G'day! I'll check if Dave can fit you in this arvo. What day and time would work best for you?",
+                     "G'day, my hot water's carked it, reckon someone could come this arvo?")
+        self.assertIn("Tuesday at 9:30am or Thursday at 2:00pm", out.text)
+        self.assertNotIn("this arvo", out.text)
+        out = self.g("Got it, 0433 987 654. Dave will call you back within fifteen minutes. Is there anything else I can assist with?", "0433 987 654.")
+        self.assertEqual(out.fixes, ["deadline"])
+        self.assertIn("as soon as possible", out.text)
+        out = self.g("Thanks Linda. I'll book you for Friday. Dave will see you today.", have_number=True)
+        self.assertEqual(out.fixes, ["promise"])
+        self.assertNotIn("today", out.text)
+        out = self.g("No, we don't do roofing. We specialise in plumbing. Let me know if you need help with anything else!")
+        self.assertEqual((out.fixes, out.text), (["sign_off"], "No, we don't do roofing. We specialise in plumbing."))
+        self.assertEqual(self.g("Sorry, I can't do today. The next free spot is Tuesday at 9:30am.").fixes, [])
+        self.assertEqual(self.g("Thanks, 0411 000 999. Dave will call you within fifteen minutes.", "0411 000 999.", urgent=True).fixes, [])
 
     def test_call_speaks_through_the_guard(self):
         call = Call(card=self.card)
