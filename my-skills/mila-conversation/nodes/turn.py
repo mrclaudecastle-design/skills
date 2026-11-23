@@ -47,6 +47,8 @@ class Call:
         self.have_number = False    # has the caller given a phone number yet?
         self.last_heard = ""        # the caller's latest line, as best heard
         self.urgent = False         # has the caller described an emergency?
+        self.all_heard = ""         # everything the caller has said so far
+        self.last_spoken = ""       # Mila's previous reply
 
     def hear(self, heard: list[tuple[str, float]], brain_reading: str | None = None,
              brain_weight: float = 0.8, topic: str = "that") -> Out:
@@ -93,7 +95,9 @@ class Call:
 
     def speak(self, brain_reply: str, diary=None) -> Out:
         """Run the brain's reply through the safety net, then into spoken form."""
-        g = guard(brain_reply, self.last_heard, self.card, diary, self.have_number, self.urgent)
+        g = guard(brain_reply, self.last_heard, self.card, diary, self.have_number, self.urgent, self.all_heard, self.last_spoken)
+        self.all_heard += " " + self.last_heard
+        self.last_spoken = g.text
         self.have_number = self.have_number or bool(PHONE.search(self.last_heard))
         self.last_heard = ""        # this line has been answered; don't read its number back twice
         return Out("say", say_it(g.text), signals=set(g.fixes))

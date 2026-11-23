@@ -16,6 +16,8 @@ is spoken and fixing it if needed:
   6. when she needs a day or time and can see the diary, she offers a free
      spot instead of asking "what time suits?"
   7. it sounds like speech: no lists, symbols or chatbot sign-offs, not too long
+  8. she never says the same thing twice in a row
+  9. she never reads back a detail the caller hasn't given (such as a made-up address)
 
     from guard import guard
     out = guard("I'll pass your call to Dave.", caller="It's Bec, 0412 345 678", card=card)
@@ -45,6 +47,10 @@ NOT_NAMES = {"Just", "Not", "After", "Looking", "Calling", "Flat", "Sorry", "At"
 URGENT = re.compile(r"\b(?:urgent|emergency|flood(?:ing|ed)?|burst|pouring|gushing|no (?:water|power|heat(?:ing)?)|smell(?:s)? (?:of |like )?(?:gas|burning)|"
                     r"sparks?|sparking|on fire|smoke|sewage|overflow(?:ing)?|can't wait|asap)\b", re.I)
 ACK = re.compile(r"^(?:thanks|thank you|got it|great|sure(?: thing)?|okay|ok|no problem|perfect|lovely|i've noted|i have noted|noted)\b", re.I)
+ADDRESS = re.compile(r"\b(?:(?:unit|flat|apartment) \d+[a-z]?,? ?)?\d{1,4}[a-z]?(?:/\d{1,4})? (?:[A-Z][\w']+ ){1,3}"
+                     r"(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Crescent|Cres|Highway|Hwy|Parade|Pde|Terrace|Tce|Lane|Ln|Boulevard|Blvd|Close|Way)\b")
+ANYTHING_ELSE = re.compile(r"^is there anything else (?:i can (?:assist|help)(?: you)?(?: with)?|you need)[^?]*\?$", re.I)
+FLUFF = re.compile(r"^(?:that(?:'s| is| slot's| slot is) (?:a |still )?free(?: spot)?(?: in the diary)?[.!]|that's available[.!])$", re.I)
 NOTED = re.compile(r"^i(?:'ve| have) (?:noted|got|taken|recorded)\b[^?]*$", re.I)
 MAX_SENTENCES = 3
 
@@ -79,15 +85,24 @@ def _sentences(text: str) -> list[str]:
 
 
 def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] | None = None,
-          have_number: bool = False, urgent: bool | None = None) -> Guarded:
+          have_number: bool = False, urgent: bool | None = None, heard_so_far: str = "", last_reply: str = "") -> Guarded:
     """diary = free spots as (day, time) pairs, or None if she can't see it.
     have_number = True once the caller's number is known from earlier in the call.
-    urgent = True if this call is an emergency (worked out from `caller` if left as None)."""
+    urgent = True if this call is an emergency (worked out from `caller` if left as None).
+    heard_so_far = everything the caller has said earlier in this call.
+    last_reply = what Mila said on her previous turn."""
     fixes, text = [], reply.strip()
     a = card.a if card else {}
     owner = a.get("owner_name", "the owner")
     if urgent is None:
         urgent = is_urgent(caller)
+
+    everything_heard = (heard_so_far + " " + caller).lower()
+
+    # 8. Never the same sentence twice in a row.
+    if last_reply and re.sub(r"\W+", " ", text).strip().lower() == re.sub(r"\W+", " ", last_reply).strip().lower():
+        fixes.append("repeat")
+        text = "Thanks, I've got that."
 
     # 7a. Speech only: no list marks or symbols.
     clean = re.sub(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", "", text)
@@ -96,6 +111,13 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     if clean != text:
         fixes.append("speech_only")
         text = clean
+
+    # 9. Never read back a detail the caller hasn't given. An address she made up becomes a question.
+    made_up = [m.group(0) for m in ADDRESS.finditer(text) if m.group(0).lower() not in everything_heard]
+    if made_up:
+        fixes.append("made_up_detail")
+        kept = [x for x in _sentences(text) if not any(a_ in x for a_ in made_up) and not x.endswith("?")]
+        text = " ".join(kept + ["What's the address for the job?"])
 
     # 2. Prices: only the ones on the card.
     allowed = {_digits(str(v)) for v in (a.get("prices") or {}).values()}
@@ -150,14 +172,15 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
 
     # 7b. No chatbot sign-offs, and not too long for a phone call.
     parts = _sentences(text)
-    real = [x for x in parts if not FILLER.match(x)]
+    real = [x for x in parts if not FILLER.match(x) and not (ANYTHING_ELSE.match(x) and not (have_number or PHONE.search(caller)))]
     if real and len(real) < len(parts):
         fixes.append("sign_off")
         parts = real
         text = " ".join(parts)
     if len(parts) > MAX_SENTENCES:
         fixes.append("too_long")
-        # Drop empty acknowledgements first ("I've noted your details."), later ones before the opener.
+        # Drop padding first ("That's a free spot in the diary."), then empty acknowledgements, later ones before the opener.
+        parts = [x for x in parts if not FLUFF.match(x)] or parts
         for i in sorted((i for i, x in enumerate(parts) if ACK.match(x) and len(x.split()) <= 5), key=lambda i: (i == 0, -i)):
             if len(parts) - 1 >= MAX_SENTENCES or len(parts) > MAX_SENTENCES:
                 parts = parts[:i] + parts[i + 1:]

@@ -267,7 +267,7 @@ class Guard(unittest.TestCase):
     def test_good_reply_is_left_alone(self):
         for reply in ["The call-out fee is $90.", "The next spot Dave has is Thursday at 2:00pm. Would that suit?",
                       "Sorry, roofing isn't something Dave does. Is there anything else I can help with?"]:
-            out = self.g(reply)
+            out = self.g(reply, have_number=True)
             self.assertEqual((out.text, out.fixes), (reply, []))
 
     def test_run_02_misses_are_caught(self):
@@ -349,6 +349,23 @@ class Guard(unittest.TestCase):
         out = self.g("Sure, Wednesday at 10am. Is that correct?", "Can I book Wednesday at 10am?")
         self.assertEqual(out.text, "Sorry, Wednesday at 10am isn't free. The next free spot is Tuesday at 9:30am. Would that suit?")
         self.assertEqual(self.g("Thanks, have a great day!", "No worries. Bye.", have_number=True).fixes, [])   # a real goodbye stays
+
+    def test_live_04_slips_are_caught(self):
+        """Real replies from the third live run (untrained Qwen, v6 guard, 23 Nov 2026)."""
+        out = self.g("Thanks, Linda. I've booked you for Friday at 11:00am. The address is 123 Main Street, right?",
+                     "My name is Linda Park and the number is 0498 111 222.", diary=[("Friday", "11:00am")],
+                     heard_so_far="Hello, I have a blocked drain. Yes, Friday is fine.")
+        self.assertIn("made_up_detail", out.fixes)
+        self.assertNotIn("Main Street", out.text)
+        self.assertEqual(out.text, "So that's Linda Park on 0498 111 222. I've booked you for Friday at 11:00am. What's the address for the job?")
+        same = "Thanks, Shane, 14 Banksia Crescent. We'll have Dave out on Thursday 2:00pm. Is there anything else I can help with?"
+        out = self.g(same, "0412 345 678.", heard_so_far="It's Shane, 14 Banksia Crescent.", last_reply=same)
+        self.assertEqual((out.fixes, out.text), (["repeat", "read_back"], "So that's 0412 345 678."))
+        self.assertEqual(self.g("Got it, Shane, 14 Banksia Crescent.", "It's Shane, 14 Banksia Crescent.", have_number=True).fixes, [])   # a real address stays
+        out = self.g("Yes, there's a call-out fee of $90. Is there anything else I can help with?", "Is there a call-out fee?")
+        self.assertEqual((out.fixes, out.text), (["sign_off"], "Yes, there's a call-out fee of $90."))
+        out = self.g("Got it, Tuesday's not working. How about Thursday 2:00pm? That's a free spot in the diary. Sounds good?", "Yeah nah, Tuesday's no good.")
+        self.assertEqual(out.text, "Got it, Tuesday's not working. How about Thursday 2:00pm? Sounds good?")
 
     def test_call_speaks_through_the_guard(self):
         call = Call(card=self.card)

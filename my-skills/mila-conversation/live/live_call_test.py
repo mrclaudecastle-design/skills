@@ -65,6 +65,7 @@ def main():
     results, fixes, lines = [], Counter(), [f"Model: {args.model}  adapter: {args.adapter_path}  load: {load_s:.1f}s", "", system, ""]
     for name, caller_lines in CALLS.items():
         messages, have_number, urgent = [{"role": "system", "content": system}], False, False
+        heard_so_far, last_reply = "", ""
         lines.append(f"=== {name} ===")
         for said in caller_lines:
             messages.append({"role": "user", "content": said})
@@ -78,7 +79,8 @@ def main():
             if "</think>" in brain:                      # in case thinking could not be switched off
                 brain = brain.split("</think>")[-1].strip()
             urgent = urgent or is_urgent(said)
-            g = guard(brain, said, card, DIARY, have_number, urgent)
+            g = guard(brain, said, card, DIARY, have_number, urgent, heard_so_far, last_reply)
+            heard_so_far, last_reply = heard_so_far + " " + said, g.text
             have_number = have_number or bool(PHONE.search(said))
             fixes.update(g.fixes)
             messages.append({"role": "assistant", "content": g.text})   # the call continues with what she really said
