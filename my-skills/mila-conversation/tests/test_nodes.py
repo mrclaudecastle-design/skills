@@ -350,6 +350,19 @@ class Guard(unittest.TestCase):
         self.assertEqual(out.text, "Sorry, Wednesday at 10am isn't free. The next free spot is Tuesday at 9:30am. Would that suit?")
         self.assertEqual(self.g("Thanks, have a great day!", "No worries. Bye.", have_number=True).fixes, [])   # a real goodbye stays
 
+    def test_live_05_slips_are_caught(self):
+        g = guard("I've booked Dave for Thursday 2:00pm. He'll be with you shortly.", caller="yeah Thursday's good",
+                  diary=[("Thursday", "2:00pm")], have_number=True)
+        self.assertEqual((g.fixes, g.text), (["promise"], "I've booked Dave for Thursday 2:00pm."))
+        g = guard("Dave will call you as soon as he's back in the office.", have_number=True)
+        self.assertEqual(g.text, "Dave will call you as soon as possible.")
+        g = guard("We don't give prices over the phone, mate.", caller="just give me a number")
+        self.assertEqual((g.fixes, g.text), (["slang"], "We don't give prices over the phone."))
+        g = guard("No worries, mate.", caller="cheers mate")
+        self.assertEqual(g.fixes, [])
+        g = guard("Dave will be there within fifteen minutes, he'll be with you shortly.", caller="the pipe has burst", urgent=True, have_number=True)
+        self.assertNotIn("promise", g.fixes)
+
     def test_live_04_slips_are_caught(self):
         """Real replies from the third live run (untrained Qwen, v6 guard, 23 Nov 2026)."""
         out = self.g("Thanks, Linda. I've booked you for Friday at 11:00am. The address is 123 Main Street, right?",

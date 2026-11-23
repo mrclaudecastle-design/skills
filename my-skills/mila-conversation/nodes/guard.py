@@ -52,6 +52,9 @@ ADDRESS = re.compile(r"\b(?:(?:unit|flat|apartment) \d+[a-z]?,? ?)?\d{1,4}[a-z]?
 ANYTHING_ELSE = re.compile(r"^is there anything else (?:i can (?:assist|help)(?: you)?(?: with)?|you need)[^?]*\?$", re.I)
 FLUFF = re.compile(r"^(?:that(?:'s| is| slot's| slot is) (?:a |still )?free(?: spot)?(?: in the diary)?[.!]|that's available[.!])$", re.I)
 NOTED = re.compile(r"^i(?:'ve| have) (?:noted|got|taken|recorded)\b[^?]*$", re.I)
+VAGUE_SOON = re.compile(r"\b(?:shortly|in no time|(?<!as )soon(?! as))\b", re.I)
+OFFICE = re.compile(r"\b(?:as soon as|once|when) (?:he|she|they)(?:'s|'re| is| are| gets?) back (?:in|at|to) the office\b", re.I)
+MATE = re.compile(r",? mate\b", re.I)
 MAX_SENTENCES = 3
 
 
@@ -169,6 +172,22 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     if not urgent and softened != " ".join(_sentences(text)):
         fixes.append("promise")
         text = softened
+
+    # 5c. "He'll be with you shortly" is a promise too, and there is no office to be back in.
+    if not urgent:
+        kept = _sentences(text)
+        if SLOT.search(text):     # a visit is booked for a set time, so "shortly" contradicts it
+            kept = [x for x in kept if SLOT.search(x) or not (VAGUE_SOON.search(x) and DOING.search(x) and not HEDGED.search(x))]
+        fixed = OFFICE.sub("as soon as possible", " ".join(kept))
+        if fixed != " ".join(_sentences(text)):
+            if "promise" not in fixes:
+                fixes.append("promise")
+            text = fixed
+
+    # 10. She goes along with slang, she doesn't start it.
+    if MATE.search(text) and "mate" not in everything_heard:
+        fixes.append("slang")
+        text = MATE.sub("", text)
 
     # 7b. No chatbot sign-offs, and not too long for a phone call.
     parts = _sentences(text)
