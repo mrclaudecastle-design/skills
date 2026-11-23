@@ -37,13 +37,15 @@ DOING = re.compile(r"\b(?:will|'ll|can|going to|gonna)\b[^.!?]*\b(?:call|ring|ph
                    r"head over|get back|get out|pop (?:over|round)|sort)\b", re.I)
 HEDGED = re.compile(r"\b(?:can't|cannot|can not|won't|not able|unable|no free|isn't|not sure|don't)\b", re.I)
 ASK_WHEN = re.compile(r"\bwhat (?:day|time)\b[^.!?]*\?|\bwhen (?:would|works|suits|is good|are you)\b[^.!?]*\?|\bwhich day\b[^.!?]*\?", re.I)
-FILLER = re.compile(r"^(?:let me know if you need (?:help with )?anything else[.!]|"
+FILLER = re.compile(r"^(?:have a (?:great|good|lovely|nice|wonderful) (?:day|one|arvo|afternoon|evening|night|weekend)[.!]|"
+                    r"thanks for (?:confirming|the details|that|calling)[.!]|let me know if you need (?:help with )?anything else[.!]|"
                     r"thanks for your patience[.!]|sound good\?|feel free to (?:call|reach out)[^.!?]*[.!])$", re.I)
 NAME = re.compile(r"\b(?i:it's|its|it is|this is|my name is|my name's|name's|i'm|i am) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)\b")
 NOT_NAMES = {"Just", "Not", "After", "Looking", "Calling", "Flat", "Sorry", "At", "On", "About", "Good", "Fine", "Here", "Still", "Also"}
 URGENT = re.compile(r"\b(?:urgent|emergency|flood(?:ing|ed)?|burst|pouring|gushing|no (?:water|power|heat(?:ing)?)|smell(?:s)? (?:of |like )?(?:gas|burning)|"
                     r"sparks?|sparking|on fire|smoke|sewage|overflow(?:ing)?|can't wait|asap)\b", re.I)
 ACK = re.compile(r"^(?:thanks|thank you|got it|great|sure(?: thing)?|okay|ok|no problem|perfect|lovely|i've noted|i have noted|noted)\b", re.I)
+NOTED = re.compile(r"^i(?:'ve| have) (?:noted|got|taken|recorded)\b[^?]*$", re.I)
 MAX_SENTENCES = 3
 
 
@@ -113,7 +115,9 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         fixes.append("time")
         if diary:
             d, t = diary[0]
-            text = f"The next free spot is {d} at {t}. Would that suit?"
+            asked = SLOT.search(caller)     # tell the caller why, if they asked for a spot that isn't free
+            why = f"Sorry, {asked.group(1).capitalize()} at {asked.group(2)} isn't free. " if asked else ""
+            text = f"{why}The next free spot is {d} at {t}. Would that suit?"
         else:
             text = (f"I can't see the diary just now, so I won't guess a time. What day suits you best, "
                     f"and I'll have {owner} confirm it?")
@@ -172,7 +176,10 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         if not any(_digits(n) in _digits(text) for n in said):
             fixes.append("read_back")
             name = caller_name(caller)
-            text = (f"So that's {name} on {said[-1]}. " if name else f"So that's {said[-1]}. ") + text
+            # The read-back already thanks them by name, so drop the brain's own "Sure thing, Tom." / "I've noted..." lines.
+            rest = [x for x in _sentences(text) if not ((ACK.match(x) and len(x.split()) <= 4) or NOTED.match(x))]
+            text = (f"So that's {name} on {said[-1]}. " if name else f"So that's {said[-1]}. ") + " ".join(rest)
+            text = text.strip()
 
     # 4. No call back promised without a number.
     # (Skipped when she is already asking something: one question at a time.)

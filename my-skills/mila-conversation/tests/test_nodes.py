@@ -337,6 +337,19 @@ class Guard(unittest.TestCase):
         self.assertEqual(self.g("Sorry, I can't do today. The next free spot is Tuesday at 9:30am.").fixes, [])
         self.assertEqual(self.g("Thanks, 0411 000 999. Dave will call you within fifteen minutes.", "0411 000 999.", urgent=True).fixes, [])
 
+    def test_live_03_slips_are_caught(self):
+        """Real replies from the second live run (untrained Qwen, v5 guard, 23 Nov 2026)."""
+        out = self.g("Sure thing, Dave will ring you back soon. Have a great day!", "Yeah alright, get him to call me.")
+        self.assertEqual(out.text, "Sure thing, Dave will ring you back soon. What's the best number for Dave to call?")
+        out = self.g("Sure thing, Tom. I'll have Dave call you right away.", "Yeah, get Dave to ring me. It's Tom on 0455 222 333.")
+        self.assertEqual(out.text, "So that's Tom on 0455 222 333. I'll have Dave call you as soon as possible.")
+        out = self.g("Thanks, Linda. I've noted your name and number. Dave will call you back to confirm the details. Have a great day!",
+                     "My name is Linda Park and the number is 0498 111 222.")
+        self.assertEqual(out.text, "So that's Linda Park on 0498 111 222. Dave will call you back to confirm the details.")
+        out = self.g("Sure, Wednesday at 10am. Is that correct?", "Can I book Wednesday at 10am?")
+        self.assertEqual(out.text, "Sorry, Wednesday at 10am isn't free. The next free spot is Tuesday at 9:30am. Would that suit?")
+        self.assertEqual(self.g("Thanks, have a great day!", "No worries. Bye.", have_number=True).fixes, [])   # a real goodbye stays
+
     def test_call_speaks_through_the_guard(self):
         call = Call(card=self.card)
         call.hear([("it's bec on 0412 345 678", 0.9)], brain_reading="it's bec on 0412 345 678")
