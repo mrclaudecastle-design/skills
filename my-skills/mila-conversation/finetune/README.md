@@ -62,3 +62,11 @@ she replies at about 30 words a second. The loss fell very low very fast, which 
 was memorising the templates. Judge a run by the five test lines before and after, not by
 the loss. Keep the "before" answers: the untrained model already offers call backs and
 reads numbers back, so a trained run must not lose those.
+
+## What the second run taught us (run-02, 23 Nov 2026)
+300 steps on `data-v3` took about 22 minutes. Replies were shorter and more natural, and she
+kept to the diary's free spots, but she still skipped reading a caller's number back and once
+promised a call back without taking details. The untrained model with the shop card and a
+"Free spots in the diary" line answered as well or better. Decision: ship the untrained model
+with the card, enforce must-do habits in `nodes/guard.py`, and fine-tune later only for tone,
+on hand-written calls rather than templates. Results are on the SSD in `MilaModels/runs/`.

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from guard import PHONE, guard                # noqa: E402
 from lingo import mirror, understand          # noqa: E402
 from plausibility import Vote, decide         # noqa: E402
 from repair import handle_key, next_step      # noqa: E402
@@ -43,10 +44,13 @@ class Call:
         self.pending = None         # a reading waiting for a yes or no
         self.keys = {}              # live keypad choices, if any
         self.guesses = []           # readings still in the running for this detail
+        self.have_number = False    # has the caller given a phone number yet?
+        self.last_heard = ""        # the caller's latest line, as best heard
 
     def hear(self, heard: list[tuple[str, float]], brain_reading: str | None = None,
              brain_weight: float = 0.8, topic: str = "that") -> Out:
         """heard = the ears' guesses, best first, each with a 0 to 1 trust score."""
+        self.last_heard = heard[0][0] if heard else ""
         votes, signals = [], set()
         for i, (text, weight) in enumerate(heard):
             u = understand(text, self.country)
@@ -84,6 +88,13 @@ class Call:
             return self._repair([], "that", 0.0, set())
         self.misses, self.pending = 0, None
         return Out("act", None, choice, 1.0)
+
+    def speak(self, brain_reply: str, diary=None) -> Out:
+        """Run the brain's reply through the safety net, then into spoken form."""
+        g = guard(brain_reply, self.last_heard, self.card, diary, self.have_number)
+        self.have_number = self.have_number or bool(PHONE.search(self.last_heard))
+        self.last_heard = ""        # this line has been answered; don't read its number back twice
+        return Out("say", say_it(g.text), signals=set(g.fixes))
 
     def ok(self) -> str:
         """A short acknowledgement. Local only if the caller was casual first."""

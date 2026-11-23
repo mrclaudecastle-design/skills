@@ -7,6 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "nodes"))
 from fillers import Fillers                                   # noqa: E402
+from guard import guard                                       # noqa: E402
 from lingo import mirror, understand                          # noqa: E402
 from plausibility import Vote, decide, phone_has_enough_digits, within_opening_days  # noqa: E402
 from repair import handle_key, next_step                      # noqa: E402
@@ -251,6 +252,71 @@ class Shop(unittest.TestCase):
                     for day, time in re.findall(r"(Monday|Tuesday|Wednesday|Thursday|Friday) at (\d+:\d\d[ap]m)", m["content"]):
                         if m["role"] == "assistant":
                             self.assertIn(f"{day} {time}", spots)        # only offers real diary spots
+
+
+class Guard(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parent.parent
+    DIARY = [("Tuesday", "9:30am"), ("Thursday", "2:00pm")]
+
+    def setUp(self):
+        self.card = ShopCard.load(self.ROOT / "shop" / "examples" / "birch-and-co.json")
+
+    def g(self, reply, caller="", diary="default", **kw):
+        return guard(reply, caller, self.card, self.DIARY if diary == "default" else diary, **kw)
+
+    def test_good_reply_is_left_alone(self):
+        for reply in ["The call-out fee is $90.", "The next spot Dave has is Thursday at 2:00pm. Would that suit?",
+                      "Sorry, roofing isn't something Dave does. Is there anything else I can help with?"]:
+            out = self.g(reply)
+            self.assertEqual((out.text, out.fixes), (reply, []))
+
+    def test_run_02_misses_are_caught(self):
+        out = self.g("I'll pass your call to Dave.", "Can you get Dave to call me back? It's Bec, 0412 345 678.")
+        self.assertEqual(out.fixes, ["read_back"])
+        self.assertTrue(out.text.endswith("Just to check, that's 0412 345 678?"))
+        out = self.g("That's an emergency. I'll get Dave to call you back now.", "There's water pouring through my ceiling!")
+        self.assertEqual(out.fixes, ["need_number"])
+        self.assertIn("best number", out.text)
+
+    def test_number_already_read_back_or_known(self):
+        self.assertEqual(self.g("So that's 0412 345 678. Dave will call you back.", "It's 0412 345 678").fixes, [])
+        self.assertEqual(self.g("So that's oh four one two... 0412345678.", "0412 345 678").fixes, [])
+        self.assertEqual(self.g("Dave will call you back shortly.", "Thanks", have_number=True).fixes, [])
+
+    def test_prices(self):
+        out = self.g("It's usually about $150 for a tap.")
+        self.assertIn("price", out.fixes)
+        self.assertNotIn("150", out.text)
+        self.assertEqual(out.text.count("?"), 1)                      # one question at a time
+        self.assertIn("price", self.g("Probably eighty bucks or 80 dollars.").fixes)
+
+    def test_times(self):
+        out = self.g("Sure, I can do Wednesday at 10am.")
+        self.assertEqual(out.fixes, ["time"])
+        self.assertIn("Tuesday at 9:30am", out.text)
+        self.assertEqual(self.g("How about Thursday at 2pm?").fixes, [])
+        self.assertIn("time", self.g("I can do Thursday at 2pm.", diary=None).fixes)   # can't see the diary
+        self.assertIn("time", self.g("I can do Sunday at 2pm.", diary=[("Sunday", "2pm")]).fixes)  # closed day
+
+    def test_deadline_and_speech(self):
+        out = self.g("Dave will be there within ten minutes.", have_number=True)
+        self.assertEqual(out.fixes, ["deadline"])
+        self.assertIn("as soon as possible", out.text)
+        self.assertEqual(self.g("Dave will ring within fifteen minutes.", have_number=True).fixes, [])   # card allows it
+        out = self.g("We do:\n- blocked drains\n- **hot water**\n- taps")
+        self.assertIn("speech_only", out.fixes)
+        self.assertNotRegex(out.text, r"[*\n-] ")
+        out = self.g("One. Two. Three. Four. Would Tuesday suit?")
+        self.assertIn("too_long", out.fixes)
+        self.assertTrue(out.text.endswith("Would Tuesday suit?"))
+
+    def test_call_speaks_through_the_guard(self):
+        call = Call(card=self.card)
+        call.hear([("it's bec on 0412 345 678", 0.9)], brain_reading="it's bec on 0412 345 678")
+        out = call.speak("Thanks Bec, I'll pass that on.", self.DIARY)
+        self.assertIn("read_back", out.signals)
+        self.assertIn("oh four one two", out.say)
+        self.assertEqual(call.speak("Dave will call you back soon.", self.DIARY).signals, set())
 
 
 if __name__ == "__main__":
