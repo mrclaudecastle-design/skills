@@ -17,12 +17,19 @@ That needs about 5 GB of free disk. Check space first.
 
 ## 2. Make the starter calls
 
-    python3 make_seed_data.py --out data-v3 --count 400
+    python3 make_calls_v3.py --out data-v4 --count 1200
 
 It refuses to write over an existing folder, so use a new `--out` name each time.
 Two sets are already here: `data/` (the first 300, plain instructions) and `data-v2/`
 (400 calls where every shop has its own questionnaire card, and Mila follows it for
-days, prices, bookings and what the shop does). Train on `data-v2`.
+days, prices, bookings and what the shop does). 
+`data-v3/` (1,200 calls, from `make_calls_v3.py`) replaces both for training. The first
+training run on `data-v2` copied the templates' wording (it kept asking "Can I get your
+name?") and dropped read-backs and call-back offers. In v3 every line Mila says has many
+wordings, the order she gathers details changes, each booking call lists the free diary
+spots in her instructions, and three habits are in every call where they apply: a phone
+number is always read back, when she doesn't know she offers a call back, and she never
+asks for something the caller already gave. Train on `data-v3`.
 
 ## 3. Train
 
@@ -48,3 +55,10 @@ Compare the same lines with and without `--adapter-path` before keeping a run.
   and check a sample by hand.
 - **Real calls** go in only under the privacy rules in the `mila-brain` skill.
 - **Never overwrite a run.** New `adapter_path` each time, and keep the old ones.
+
+## What the first run taught us (run-01, 23 Nov 2026)
+100 steps on `data-v2` took about 7 minutes on a 16 GB Mac, with no memory trouble, and
+she replies at about 30 words a second. The loss fell very low very fast, which meant she
+was memorising the templates. Judge a run by the five test lines before and after, not by
+the loss. Keep the "before" answers: the untrained model already offers call backs and
+reads numbers back, so a trained run must not lose those.

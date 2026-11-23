@@ -231,6 +231,27 @@ class Shop(unittest.TestCase):
             if "$" in said and "0412" not in said:
                 self.assertIn("Prices you may say", system)
 
+    def test_v3_calls_keep_the_three_habits(self):
+        import re
+        sys.path.insert(0, str(self.ROOT / "finetune"))
+        from make_calls_v3 import make
+        rows = make(300, seed=5)
+        lines = [m["content"] for row in rows for m in row["messages"] if m["role"] == "assistant"]
+        self.assertGreater(len(set(lines)) / len(lines), 0.5)          # varied wording, not templates
+        for row in rows:
+            turns = row["messages"][1:]
+            self.assertEqual(turns[-1]["role"], "assistant")
+            for i, m in enumerate(turns[:-1]):
+                if m["role"] == "user":
+                    for number in re.findall(r"04\d\d \d{3} \d{3}|\d{3}-555-01\d\d", m["content"]):
+                        self.assertIn(number, turns[i + 1]["content"])   # every number is read back
+            if "Free spots in the diary" in row["messages"][0]["content"]:
+                spots = row["messages"][0]["content"].split("Free spots in the diary: ")[1]
+                for m in turns:
+                    for day, time in re.findall(r"(Monday|Tuesday|Wednesday|Thursday|Friday) at (\d+:\d\d[ap]m)", m["content"]):
+                        if m["role"] == "assistant":
+                            self.assertIn(f"{day} {time}", spots)        # only offers real diary spots
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
