@@ -119,6 +119,17 @@ RELATIVE = re.compile(r"\b(today|tonight|this (?:arvo|afternoon|morning|evening)
 WEEK = "monday tuesday wednesday thursday friday saturday sunday".split()
 
 
+def _hours_or_offer(m) -> str:
+    """'open 7am to 4pm' is hours talk and is dropped; 'Wednesday 10am to 11am' or
+    'Wednesday from 10am' is an offer, so its first time is kept."""
+    before = m.string[:m.start()]
+    next_to_day = re.search(DAY + r"\s*,?\s*(?:at\s+)?$", before, re.I)
+    day_span = re.search(DAY + r"\s+(?:to|till|through|-|–)\s+" + DAY + r"\s*,?\s*$", before, re.I)
+    if next_to_day and not day_span:
+        return " at " + re.search(_T, m.group(0)).group(0)
+    return " "
+
+
 def offered_slots(text: str, context_day: str = "", today: str | None = None) -> list[tuple[str, str]]:
     """Every (day, time) offered, in either order: 'Tuesday at 9:30am', '10am on Tuesday',
     'Tuesday at 9 or 11am', 'tomorrow at 2pm' (needs `today`, a weekday name).
@@ -127,7 +138,7 @@ def offered_slots(text: str, context_day: str = "", today: str | None = None) ->
     Talk about opening hours ('open 7am to 5pm') is not an offer."""
     found = []
     for sentence in _sentences(text):
-        sentence = HOURS_PHRASE.sub(" ", TIME_RANGE.sub(" ", sentence))    # "open 7am to 4pm" is hours talk, not an offer
+        sentence = HOURS_PHRASE.sub(_hours_or_offer, TIME_RANGE.sub(_hours_or_offer, sentence))
         hits = list(SLOT_OR_TIME.finditer(sentence))
         rel = RELATIVE.search(sentence)
         if rel and not any(h.group(1) for h in hits):
@@ -233,8 +244,9 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     # 3. Days and times: only real free spots, only on working days.
     open_days = {d.lower() for d in a.get("open_days", [])}
     # A time with no day takes its day from the call: what the caller just said, then her last reply, then earlier.
-    recent_days = [m.group(1).lower() for src in (caller, last_reply, heard_so_far)
-                   for m in reversed(list(re.finditer(DAY, src, re.I)))]
+    caller_days = [m.group(1).lower() for m in re.finditer(DAY, caller, re.I)]
+    recent_days = caller_days[-1:] if caller_days else [   # the day the caller last named wins outright
+        m.group(1).lower() for src in (last_reply, heard_so_far) for m in reversed(list(re.finditer(DAY, src, re.I)))]
     free_now = None if diary is None else {(d.lower(), _norm_time(t)) for d, t in diary}
 
     def which_day(t):

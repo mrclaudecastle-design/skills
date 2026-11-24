@@ -418,6 +418,12 @@ class Guard(unittest.TestCase):
         self.assertIn("time", guard("We're open then, so how about Wednesday at 10am?", diary=diary).fixes)
         self.assertIn("time", guard("We work 7am to 4pm, I can do Monday at 10am.", diary=diary).fixes)
         self.assertNotIn("time", guard("We work 7am to 4pm, I can do Friday at 11:00am.", diary=diary).fixes)
+        self.assertIn("time", guard("How about Wednesday from 10am?", diary=diary).fixes)
+        self.assertIn("time", guard("I can do Wednesday 10am to 11am.", diary=diary).fixes)
+        self.assertNotIn("time", guard("We're open Monday to Friday, 7am to 4pm.", diary=diary).fixes)
+        g = guard("Sure, 2:00pm works, I've got you down.", caller="Not Thursday. Can you do Wednesday at 2pm?",
+                  last_reply="How about Thursday at 2:00pm?", diary=diary, have_number=True)
+        self.assertIn("time", g.fixes)
         g = guard("Great, 123 Main Street it is.", caller="yes", last_reply="So that's 123 Main Street.", have_number=True)
         self.assertIn("made_up_detail", g.fixes)
 
