@@ -112,7 +112,9 @@ def spoken_numbers(text: str) -> str:
 
 
 HOURS_TALK = re.compile(r"\b(?:open|opening|hours|closed?|closes|shut)\b", re.I)
-TIME_RANGE = re.compile(r"\d(?:\s?[ap]\.?m\.?)?\s*(?:to|till|until|-|–)\s*\d", re.I)
+_T = r"\d{1,2}(?::\d{2})?(?:\s?[ap]\.?m\.?)?"
+TIME_RANGE = re.compile(_T + r"\s*(?:to|till|until|-|–)\s*" + _T + r"(?![\w:])", re.I)
+HOURS_PHRASE = re.compile(r"\b(?:open(?:s|ing)?|close[sd]?|shut|until|till|from|start(?:s)?|finish(?:es)?)\s+(?:at\s+|around\s+)?" + _T + r"(?![\w:])", re.I)
 RELATIVE = re.compile(r"\b(today|tonight|this (?:arvo|afternoon|morning|evening)|tomorrow)\b", re.I)
 WEEK = "monday tuesday wednesday thursday friday saturday sunday".split()
 
@@ -125,8 +127,7 @@ def offered_slots(text: str, context_day: str = "", today: str | None = None) ->
     Talk about opening hours ('open 7am to 5pm') is not an offer."""
     found = []
     for sentence in _sentences(text):
-        if HOURS_TALK.search(sentence) or TIME_RANGE.search(sentence):
-            continue
+        sentence = HOURS_PHRASE.sub(" ", TIME_RANGE.sub(" ", sentence))    # "open 7am to 4pm" is hours talk, not an offer
         hits = list(SLOT_OR_TIME.finditer(sentence))
         rel = RELATIVE.search(sentence)
         if rel and not any(h.group(1) for h in hits):
@@ -197,7 +198,7 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     text = text.replace("\u2019", "'").replace("\u2018", "'")
     caller = spoken_numbers(caller.replace("\u2019", "'").replace("\u2018", "'"))
     heard_so_far = spoken_numbers(heard_so_far.replace("\u2019", "'"))
-    everything_heard = (heard_so_far + " " + caller + " " + last_reply.replace("\u2019", "'")).lower()
+    everything_heard = (heard_so_far + " " + caller).lower()
 
     # 8. Never the same sentence twice in a row.
     # Reading back a detail the caller has just said again (a correction) is not a repeat.
@@ -231,8 +232,17 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
 
     # 3. Days and times: only real free spots, only on working days.
     open_days = {d.lower() for d in a.get("open_days", [])}
-    said_day = next((m.group(1) for m in reversed(list(re.finditer(DAY, caller, re.I)))), "")
-    offered = [(d.lower(), _norm_time(t)) for d, t in offered_slots(text, said_day, today)]
+    # A time with no day takes its day from the call: what the caller just said, then her last reply, then earlier.
+    recent_days = [m.group(1).lower() for src in (caller, last_reply, heard_so_far)
+                   for m in reversed(list(re.finditer(DAY, src, re.I)))]
+    free_now = None if diary is None else {(d.lower(), _norm_time(t)) for d, t in diary}
+
+    def which_day(t):
+        for d in recent_days:                      # prefer a recent day where that time is actually free
+            if free_now is None or (d, t) in free_now:
+                return d
+        return recent_days[0] if recent_days else ""
+    offered = [(d.lower() or which_day(_norm_time(t)), _norm_time(t)) for d, t in offered_slots(text, "", today)]
     free = None if diary is None else {(d.lower(), _norm_time(t)) for d, t in diary}
     def slot_ok(s):
         day, t = s

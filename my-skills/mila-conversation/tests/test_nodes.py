@@ -409,6 +409,18 @@ class Guard(unittest.TestCase):
         self.assertIn("Unit 5", g.text)
         self.assertIn("21 Bay Street", g.text)
 
+    def test_mac_hand_check_v11(self):
+        """Found by hand on v11 (24 Nov 2026)."""
+        diary = [("Tuesday", "9:30am"), ("Thursday", "2:00pm"), ("Friday", "11:00am")]
+        g = guard("Great, I've got you down for 2:00pm.", caller="Yes, that works.", diary=diary, have_number=True,
+                  last_reply="I have Thursday at 2:00pm. Would that suit?")
+        self.assertNotIn("time", g.fixes)
+        self.assertIn("time", guard("We're open then, so how about Wednesday at 10am?", diary=diary).fixes)
+        self.assertIn("time", guard("We work 7am to 4pm, I can do Monday at 10am.", diary=diary).fixes)
+        self.assertNotIn("time", guard("We work 7am to 4pm, I can do Friday at 11:00am.", diary=diary).fixes)
+        g = guard("Great, 123 Main Street it is.", caller="yes", last_reply="So that's 123 Main Street.", have_number=True)
+        self.assertIn("made_up_detail", g.fixes)
+
     def test_spoken_numbers(self):
         from guard import spoken_numbers
         self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")
