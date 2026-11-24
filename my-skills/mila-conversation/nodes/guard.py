@@ -35,13 +35,14 @@ DEADLINE = re.compile(r"\b(?:within|in) (?:the next )?(?:\d+|a|an|five|ten|fifte
 CALLBACK = re.compile(r"\b(?:call|ring|phone|get back to) you\b|\bcall(?:s)? you back\b|\bcall back\b", re.I)
 SOON = re.compile(r"\b(?:later )?(?:today|tonight|tomorrow(?: (?:morning|arvo|afternoon))?|this (?:arvo|afternoon|morning|evening)|"
                   r"right now|right away|straight away|immediately)\b|\bnow(?=[.!?,]|$)", re.I)
-DOING = re.compile(r"\b(?:will|'ll|can|going to|gonna)\b[^.!?]*\b(?:call|ring|phone|come|be there|be with you|be out|see you|fit you in|"
+DOING = re.compile(r"\b(?:will|'ll|can|going to|gonna)\b[^.!?]*\b(?:call|ring|phone|come|be there|be with you|be out|see you|fit you in|pass|let \w+ know|"
                    r"head over|get back|get out|pop (?:over|round)|sort)\b", re.I)
 HEDGED = re.compile(r"\b(?:can't|cannot|can not|won't|not able|unable|no free|isn't|not sure|don't)\b", re.I)
 ASK_WHEN = re.compile(r"\bwhat (?:day|time)\b[^.!?]*\?|\bwhen (?:would|works|suits|is good|are you)\b[^.!?]*\?|\bwhich day\b[^.!?]*\?", re.I)
 FILLER = re.compile(r"^(?:have a (?:great|good|lovely|nice|wonderful) (?:day|one|arvo|afternoon|evening|night|weekend)[.!]|"
                     r"thanks for (?:confirming|the details|that|calling)[.!]|let me know if you need (?:help with )?anything else[.!]|"
-                    r"thanks for your patience[.!]|sound good\?|feel free to (?:call|reach out)[^.!?]*[.!])$", re.I)
+                    r"thanks for your patience[.!]|sound good\?|feel free to (?:call|reach out)[^.!?]*[.!]|"
+                    r"let (?:me|us) know (?:how|if) (?:we|i) can (?:help|assist)[^.!?]*[.!])$", re.I)
 NAME = re.compile(r"\b(?i:it's|its|it is|this is|my name is|my name's|name's|i'm|i am) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)\b")
 NOT_NAMES = {"Just", "Not", "After", "Looking", "Calling", "Flat", "Sorry", "At", "On", "About", "Good", "Fine", "Here", "Still", "Also",
              "Unit", "Number", "Apartment", "Level", "Lot", "Shop", "Suite"}
@@ -50,7 +51,7 @@ URGENT = re.compile(r"\b(?:urgent|emergency|flood(?:ing|ed)?|burst|pouring|gushi
 ACK = re.compile(r"^(?:thanks|thank you|got it|great|sure(?: thing)?|okay|ok|no problem|perfect|lovely|i've noted|i have noted|noted)\b", re.I)
 ADDRESS = re.compile(r"\b(?:(?:unit|flat|apartment) \d+[a-z]?,? ?)?\d{1,4}[a-z]?(?:/\d{1,4})? (?:[A-Z][\w']+ ){1,3}"
                      r"(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Crescent|Cres|Highway|Hwy|Parade|Pde|Terrace|Tce|Lane|Ln|Boulevard|Blvd|Close|Way)\b")
-ANYTHING_ELSE = re.compile(r"^is there anything else (?:i can (?:assist|help)(?: you)?(?: with)?|you need)[^?]*\?$", re.I)
+ANYTHING_ELSE = re.compile(r"^is there anything else (?:i can (?:assist|help)(?: you)?(?: with)?|you need|you'd like to add|you want to add)[^?]*\?$", re.I)
 FLUFF = re.compile(r"^(?:that(?:'s| is| slot's| slot is) (?:a |still )?free(?: spot)?(?: in the diary)?[.!]|that's available[.!])$", re.I)
 NOTED = re.compile(r"^i(?:'ve| have) (?:noted|got|taken|recorded)\b[^?]*$", re.I)
 VAGUE_SOON = re.compile(r"\b(?:shortly|in no time|(?<!as )soon(?! as))\b", re.I)
@@ -365,14 +366,16 @@ def offered_slots(text: str, context_day: str = "", today: str | None = None) ->
                 context_day = WEEK[n % 7]
             else:
                 context_day = "?"
-        last_day = context_day
+        last_day, day_seen = context_day, False
         for n, m in enumerate(hits):
             if m.group(1):
                 last_day = context_day = m.group(1)
+                day_seen = True
                 continue
             nxt = hits[n + 1] if n + 1 < len(hits) else None
             gap = sentence[m.end():nxt.start()] if nxt else ""
-            if nxt and nxt.group(1) and re.fullmatch(r"\s*(?:on|this|next|,)?\s*(?:this |next )?", gap, re.I):
+            joiner = r"\s*(?:on|this|next)?\s*(?:this |next )?" if day_seen else r"\s*(?:on|this|next|,)?\s*(?:this |next )?"
+            if nxt and nxt.group(1) and re.fullmatch(joiner, gap, re.I):   # "Tuesday at 9:30am, Thursday at 2pm" is a list
                 found.append((nxt.group(1), m.group(2)))
             else:
                 found.append((last_day, m.group(2)))
@@ -451,6 +454,14 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         fixes.append("template")
         kept = [x for x in _sentences(text) if not re.search(r"\[|\]|\{|\}|\||<[a-z_ ]+>", x, re.I)]
         text = " ".join(kept) or "Sorry, could you say that again?"
+
+    # 7b. Wording the card asks for: no "pass your message on" (there may be none), no booking a call back.
+    worded = re.sub(r"\bpass (?:on )?(?:your|the) message(?: on)?(?: to (\w+))?", lambda m: f"let {m.group(1) or owner} know you called", text, flags=re.I)
+    worded = re.sub(r"\bpass your message (?:on )?to (\w+)", r"let \1 know you called", worded, flags=re.I)
+    worded = re.sub(r"\bbook (?:a time|a call(?: ?back)?|in a time) for (\w+) to (?:call|ring)(?: you)?(?: back)?", r"have \1 call you back", worded, flags=re.I)
+    if worded != text:
+        fixes.append("wording")
+        text = worded
 
     # 7a. Speech only: no list marks or symbols.
     clean = re.sub(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", "", text)
@@ -687,7 +698,10 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
 
     # 4. No call back promised without a number.
     # (Skipped when she is already asking something: one question at a time.)
-    if CALLBACK.search(text) and not have_number and not text.rstrip().endswith("?") and not re.search(r"number", text, re.I):
+    owner_calls = re.search(r"\b(?:call|ring|phone|get back to) you\b|\b(?:he|she|they|we|" + re.escape(owner) + r")(?:'ll| will| can)?\s+(?:give you a )?(?:call|ring)", text, re.I)
+    goodbye = re.search(r"\b(?:bye|goodbye|see ya|hooroo|catch ya)\b", caller, re.I)
+    if CALLBACK.search(text) and owner_calls and not goodbye and not have_number and not text.rstrip().endswith("?") \
+            and not re.search(r"number", text, re.I):
         fixes.append("need_number")
         text = text.rstrip() + f" What's the best number for {owner} to call?"
 

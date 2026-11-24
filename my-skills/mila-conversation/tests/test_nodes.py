@@ -597,6 +597,26 @@ class Guard(unittest.TestCase):
         self.assertIn("time", guard("I can do half past nine on Tuesday.", diary=diary).fixes)
         self.assertNotIn("time", guard("I can do eight o'clock Tuesday.", diary=diary).fixes)
 
+    def test_live_06_slips_are_caught(self):
+        """Real replies from live round 6 (untrained Qwen, card kept ready, 24 Nov 2026)."""
+        diary = [("Tuesday", "9:30am"), ("Thursday", "2:00pm"), ("Friday", "11:00am")]
+        # Call 8: a plain list of the free spots is left alone.
+        g = guard("We have Tuesday at 9:30am, Thursday at 2:00pm, or Friday at 11:00am. Which suits?", caller="Righto, what have you got then?",
+                  diary=diary)
+        self.assertNotIn("time", g.fixes)
+        # Call 12: inviting the caller to ring back on a goodbye is not a promise of a call.
+        g = guard("Thanks for calling Birch and Co Plumbing. If you need help with plumbing, feel free to call back.", caller="No worries. Bye.")
+        self.assertNotIn("need_number", g.fixes)
+        # Fillers.
+        self.assertIn("sign_off", guard("Got it, Bec. Is there anything else you'd like to add?", caller="it's about the quote").fixes)
+        self.assertIn("sign_off", guard("We don't do roofing, sorry. Let me know how we can help with your issue!", caller="roofing?").fixes)
+        # Wording.
+        g = guard("I'll pass your message to Dave right away.", caller="get Dave to ring me", have_number=True)
+        self.assertNotIn("message", g.text)
+        self.assertNotIn("right away", g.text)
+        g = guard("Would you like to book a time for Dave to call?", have_number=True)
+        self.assertEqual(g.text, "Would you like to have Dave call you back?")
+
     def test_spoken_numbers(self):
         from guard import spoken_numbers
         self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")
