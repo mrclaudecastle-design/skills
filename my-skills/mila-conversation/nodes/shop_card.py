@@ -14,6 +14,7 @@ the sanity checks for the voting node (such as the days the shop works).
     card.checks()         -> [checks for plausibility.decide]
 """
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -28,8 +29,8 @@ MANNERS = ("You are on a live phone call, so speak the way people talk: one or t
            "one question at a time, no lists. Understand everyday local expressions and go along with them warmly, "
            "but don't start using slang yourself. Read names, numbers, days and times back to confirm them. "
            "Never invent a price, a time or a promise. When a day or time is needed, offer a free spot from the diary rather than asking "
-           "what time suits. Once the caller agrees to a spot, it is booked: read the day and time back, and don't say anyone will "
-           "confirm it later. Don't say when someone will call or arrive unless these notes say so. Don't say goodbye until you have "
+           "what time suits. Once the caller picks a spot, read back the day, time, their name, address and number in one go, and "
+           "book it only when they say yes to that. Don't say anyone will confirm it later. Don't say when someone will call or arrive unless these notes say so. Don't say goodbye until you have "
            "the caller's name and number. Only say you'll pass on a message if the caller gave you one. "
            "End naturally, the way a person would on the phone, without sign-offs like 'let me know if you need anything else'.")
 
@@ -63,7 +64,11 @@ class ShopCard:
         return self.a.get("country", "au")
 
     def greeting(self) -> str:
-        return self.a["greeting"].format(shop_name=self.a.get("shop_name", ""))
+        g = self.a["greeting"].format(shop_name=self.a.get("shop_name", ""))
+        if not re.search(r"\bAI\b", g):        # callers are always told she's an AI, whatever the shop wrote
+            g = re.sub(r"\bMila\b", "Mila, the AI receptionist", g, count=1) if re.search(r"\bMila\b", g) \
+                else g.rstrip() + " This is Mila, the AI receptionist."
+        return g
 
     def checks(self) -> list:
         """Sanity checks for the voting node, built from this shop's answers."""

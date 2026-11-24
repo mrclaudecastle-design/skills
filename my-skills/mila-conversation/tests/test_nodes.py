@@ -204,7 +204,7 @@ class Shop(unittest.TestCase):
         text = card.instructions()
         self.assertIn("You have no prices", text)
         self.assertIn("You don't book jobs", text)
-        self.assertEqual(card.greeting(), "Birch and Co, this is Mila. How can I help?")
+        self.assertEqual(card.greeting(), "Birch and Co, this is Mila, the AI receptionist. How can I help?")
 
     def test_missing_and_bad_answers_are_named_in_plain_words(self):
         card = ShopCard({"shop_name": "Birch and Co", "country": "nz"})
@@ -349,6 +349,38 @@ class Guard(unittest.TestCase):
         out = self.g("Sure, Wednesday at 10am. Is that correct?", "Can I book Wednesday at 10am?")
         self.assertEqual(out.text, "Sorry, Wednesday at 10am isn't free. The next free spot is Tuesday at 9:30am. Would that suit?")
         self.assertEqual(self.g("Thanks, have a great day!", "No worries. Bye.", have_number=True).fixes, [])   # a real goodbye stays
+
+    def test_launch_thread_replay_faults(self):
+        """Faults found when the launch thread replayed 206 real replies from 34 saved calls (24 Nov 2026)."""
+        diary = [("Tuesday", "9:30am"), ("Wednesday", "9am"), ("Thursday", "2:00pm")]
+        # 1. A real appointment time is not a vague promise.
+        g = guard("Dave can come at 9am tomorrow.", caller="tomorrow works", have_number=True)
+        self.assertNotIn("promise", g.fixes)
+        # 2. Re-reading a corrected address is not a repeat.
+        last = "So that's 47 Ocean Street. Is that right?"
+        g = guard(last, caller="No, 47 Ocean Street, not 41.", last_reply=last, have_number=True)
+        self.assertNotIn("repeat", g.fixes)
+        # 3. An address or number said in words counts as given.
+        g = guard("So that's 47 Ocean Street.", caller="it's forty seven Ocean Street", have_number=True)
+        self.assertNotIn("made_up_detail", g.fixes)
+        g = guard("Dave will call you back.", caller="it's oh four one two, three four five, six seven eight")
+        self.assertNotIn("need_number", g.fixes)
+        # 4. Too long never cuts the number out of a read-back.
+        g = guard("Thanks Shane. That's a free spot in the diary. Lovely. Your number is 0412 345 678. Dave will see you Thursday at 2:00pm. "
+                  "Anything else?", have_number=True, diary=diary)
+        self.assertIn("0412 345 678", g.text)
+        # 5. Time first, a wrong time in a list, a near-miss house number, curly apostrophes.
+        self.assertIn("time", guard("I can do 10 am on Tuesday.", diary=diary).fixes)
+        self.assertIn("time", guard("I have Tuesday at 9:30am or 11am.", diary=diary).fixes)
+        self.assertNotIn("time", guard("I have Tuesday at 9:30am or Wednesday at 9am.", diary=diary).fixes)
+        self.assertIn("made_up_detail", guard("So that's 7 Ocean Street.", caller="47 Ocean Street", have_number=True).fixes)
+        self.assertIn("promise", guard("Dave\u2019ll ring you back today.", have_number=True).fixes)
+
+    def test_spoken_numbers(self):
+        from guard import spoken_numbers
+        self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")
+        self.assertEqual(spoken_numbers("oh four one two, three four five, six seven eight"), "0412345678")
+        self.assertEqual(spoken_numbers("ring 0412 345 678"), "ring 0412 345 678")
 
     def test_live_05_slips_are_caught(self):
         g = guard("I've booked Dave for Thursday 2:00pm. He'll be with you shortly.", caller="yeah Thursday's good",
