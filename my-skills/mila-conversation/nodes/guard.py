@@ -125,8 +125,9 @@ def _hours_or_offer(m) -> str:
     before = m.string[:m.start()]
     next_to_day = re.search(DAY + r"\s*,?\s*(?:at\s+)?$", before, re.I)
     day_span = re.search(DAY + r"\s+(?:to|till|through|-|–)\s+" + DAY + r"\s*,?\s*$", before, re.I)
-    if next_to_day and not day_span:
-        return " at " + re.search(_T, m.group(0)).group(0)
+    day_after = re.match(r"\s*(?:on\s+|this\s+|next\s+)?" + DAY, m.string[m.end():], re.I)
+    if (next_to_day and not day_span or day_after) and not HOURS_TALK.search(before):
+        return " at " + re.search(_T, m.group(0)).group(0) + " "
     return " "
 
 
@@ -244,7 +245,8 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     # 3. Days and times: only real free spots, only on working days.
     open_days = {d.lower() for d in a.get("open_days", [])}
     # A time with no day takes its day from the call: what the caller just said, then her last reply, then earlier.
-    caller_days = [m.group(1).lower() for m in re.finditer(DAY, caller, re.I)]
+    refused = {m.group(1).lower() for m in re.finditer(r"\b(?:not|no|can't do|cannot do|can't make)\s+(?:on\s+)?" + DAY, caller, re.I)}
+    caller_days = [m.group(1).lower() for m in re.finditer(DAY, caller, re.I) if m.group(1).lower() not in refused]
     recent_days = caller_days[-1:] if caller_days else [   # the day the caller last named wins outright
         m.group(1).lower() for src in (last_reply, heard_so_far) for m in reversed(list(re.finditer(DAY, src, re.I)))]
     free_now = None if diary is None else {(d.lower(), _norm_time(t)) for d, t in diary}
