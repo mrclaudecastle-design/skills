@@ -57,6 +57,14 @@ OFFICE = re.compile(r"\b(?:as soon as|once|when) (?:he|she|they)(?:'s|'re| is| a
 MATE = re.compile(r",? mate\b", re.I)
 CLOCK = re.compile(r"\b\d{1,2}(?::\d{2})?\s?[ap]\.?m\.?(?![a-z])", re.I)
 SLOT_OR_TIME = re.compile(DAY + r"|(\d{1,2}(?::\d{2})?\s?[ap]\.?m\.?)(?![a-z])", re.I)
+STREET_TYPES = (r"(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Crescent|Cres|Highway|Hwy|Parade|Pde|"
+                r"Terrace|Tce|Lane|Ln|Boulevard|Blvd|Close|Way)")
+STREET = re.compile(r"\b((?:[A-Z][\w']+ ){1,3}" + STREET_TYPES + r")\b")
+HOUSE_NUMBER = re.compile(r"(?<![\d:/])\d{1,4}[a-z]?(?![\d:])", re.I)
+REFUSE_BEFORE = re.compile(r"\b(?:not|no(?!\s+(?:worries|problem|dramas|probs))|can't|cannot|can not|couldn't|won't)\b"
+                           r"(?:\s+[\w']+){0,3}?\s+(?:on\s+)?" + DAY, re.I)
+REFUSE_AFTER = re.compile(DAY + r"(?:'s|\s+is)?\s+(?:no good|not good|out|no go|a no|not great|bad|no use)\b|"
+                          + DAY + r"\s+(?:doesn't|does not|won't|wouldn't|isn't)\b", re.I)
 MAX_SENTENCES = 3
 
 _UNITS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine".split())}
@@ -100,8 +108,14 @@ def spoken_numbers(text: str) -> str:
             while k < len(words) and (words[k].isspace() or words[k] in (",", "-")):
                 k += 1
             nxt = words[k].lower() if k < len(words) else ""
-            # "oh four one two, three four five" is one number; "unit three, forty seven" is two.
-            if not (unit[0] and (nxt in _UNITS or nxt in ("double", "triple"))):
+            # "oh four one two, three four five" and "oh four twelve, ..." are one phone number;
+            # "unit two, three Smith Street" and "unit three, forty seven" are two numbers.
+            so_far = "".join(run)
+            phone_like = so_far.startswith("0") or len(so_far) >= 4
+            digit_word = nxt in _UNITS or nxt in ("double", "triple")
+            join = (phone_like and (digit_word or nxt in _TEENS or nxt in _TENS)) or \
+                   (unit[0] and digit_word and "," not in "".join(words[i:k]))
+            if not join:
                 flush(); out.extend(words[i:k])       # keep the gap exactly as said
             i = k - 1
         else:
@@ -111,10 +125,10 @@ def spoken_numbers(text: str) -> str:
     return "".join(out)
 
 
-HOURS_TALK = re.compile(r"\b(?:open|opening|hours|closed?|closes|shut)\b", re.I)
+HOURS_TALK = re.compile(r"\b(?:open|opening hours|hours|closed?|closes|shut)\b", re.I)
 _T = r"\d{1,2}(?::\d{2})?(?:\s?[ap]\.?m\.?)?"
 TIME_RANGE = re.compile(_T + r"\s*(?:to|till|until|-|–)\s*" + _T + r"(?![\w:])", re.I)
-HOURS_PHRASE = re.compile(r"\b(?:open(?:s|ing)?|close[sd]?|shut|until|till|from|start(?:s)?|finish(?:es)?)\s+(?:at\s+|around\s+)?" + _T + r"(?![\w:])", re.I)
+HOURS_PHRASE = re.compile(r"\b(?:open(?:s)?|close[sd]?|shut|until|till|from|start(?:s)?|finish(?:es)?)\s+(?:at\s+|around\s+)?" + _T + r"(?![\w:])", re.I)
 RELATIVE = re.compile(r"\b(today|tonight|this (?:arvo|afternoon|morning|evening)|tomorrow)\b", re.I)
 WEEK = "monday tuesday wednesday thursday friday saturday sunday".split()
 
@@ -123,12 +137,57 @@ def _hours_or_offer(m) -> str:
     """'open 7am to 4pm' is hours talk and is dropped; 'Wednesday 10am to 11am' or
     'Wednesday from 10am' is an offer, so its first time is kept."""
     before = m.string[:m.start()]
-    next_to_day = re.search(DAY + r"\s*,?\s*(?:at\s+)?$", before, re.I)
+    next_to_day = re.search(DAY + r"\s*,?\s*(?:at\s+|from\s+)?$", before, re.I)
     day_span = re.search(DAY + r"\s+(?:to|till|through|-|–)\s+" + DAY + r"\s*,?\s*$", before, re.I)
-    day_after = re.match(r"\s*(?:on\s+|this\s+|next\s+)?" + DAY, m.string[m.end():], re.I)
+    day_after = re.match(r"\s*,?\s*(?:on\s+|this\s+|next\s+)?" + DAY, m.string[m.end():], re.I)
     if (next_to_day and not day_span or day_after) and not HOURS_TALK.search(before):
-        return " at " + re.search(_T, m.group(0)).group(0) + " "
+        times = re.findall(_T, m.group(0))
+        first = times[0]
+        if not re.search(r"[ap]\.?m", first, re.I):          # "10 to 11 am": the first time borrows "am"
+            first += re.search(r"\s?[ap]\.?m\.?$", times[-1], re.I).group(0) if re.search(r"[ap]\.?m", times[-1], re.I) else ""
+        return " at " + first + " "
     return " "
+
+
+def _mask(text: str) -> str:
+    """Blank out phone numbers, clock times and prices (same length), so only house numbers are left."""
+    for rx in (PHONE, CLOCK, MONEY):
+        text = rx.sub(lambda m: " " * len(m.group(0)), text)
+    return text
+
+
+def _numbers_near(text: str, start: int, end: int, before: int, after: int, cut_before: bool) -> list[str]:
+    head = text[max(0, start - before):start]
+    if cut_before:
+        head = re.split(r"[.!?]\s", head)[-1]
+    tail = re.split(r"[.!?]", text[end:end + after])[0]
+    return [n.lower() for n in HOUSE_NUMBER.findall(head + " " + tail)]
+
+
+def made_up_streets(reply: str, heard: str) -> list[str]:
+    """Street names in the reply whose numbers (house, unit) the caller never said with that street.
+    'Unit 22, number 22 Ocean Street' after 'unit two, twenty two Ocean Street' is caught;
+    'Is that 21 Bay Street, Unit 5' after 'Unit five, number twenty one. Bay Street' is fine."""
+    from collections import Counter
+    r, h = _mask(reply), _mask(spoken_numbers(heard))
+    bad = []
+    for m in STREET.finditer(reply):
+        mine = Counter(_numbers_near(r, m.start(), m.end(), 30, 20, True))
+        if not mine:
+            continue                     # a street name with no number is not a read-back
+        spots = [x for x in re.finditer(re.escape(m.group(1).lower()), h.lower())]
+        if not any(not (mine - Counter(_numbers_near(h, x.start(), x.end(), 45, 20, False))) for x in spots):
+            bad.append(m.group(1))
+    return bad
+
+
+def refused_days(text: str) -> set:
+    """Days the caller has said no to: 'not Thursday', 'Thursday's no good', 'I can't come Thursday'."""
+    days = set()
+    for rx in (REFUSE_BEFORE, REFUSE_AFTER):
+        for m in rx.finditer(text):
+            days.add((m.group(1) or m.group(2) or "").lower() if rx is REFUSE_AFTER else m.group(1).lower())
+    return days - {""}
 
 
 def offered_slots(text: str, context_day: str = "", today: str | None = None) -> list[tuple[str, str]]:
@@ -214,7 +273,9 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
 
     # 8. Never the same sentence twice in a row.
     # Reading back a detail the caller has just said again (a correction) is not a repeat.
-    is_read_back = bool(set(re.findall(r"\d+", text)) & set(re.findall(r"\d+", caller)))
+    reply_caps = {w.lower() for w in re.findall(r"(?<![.!?]\s)(?<!^)\b[A-Z][a-z']{2,}", text)}
+    caller_words = {w.lower() for w in re.findall(r"[A-Za-z']{3,}", caller)}
+    is_read_back = bool(set(re.findall(r"\d+", text)) & set(re.findall(r"\d+", caller))) or bool(reply_caps & caller_words)
     if last_reply and not is_read_back and re.sub(r"\W+", " ", text).strip().lower() == re.sub(r"\W+", " ", last_reply).strip().lower():
         fixes.append("repeat")
         text = "Thanks, I've got that."
@@ -228,8 +289,7 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         text = clean
 
     # 9. Never read back a detail the caller hasn't given. An address she made up becomes a question.
-    made_up = [m.group(0) for m in ADDRESS.finditer(text)
-               if not re.search(r"(?<![\w/])" + re.escape(m.group(0).lower()), everything_heard)]
+    made_up = made_up_streets(text, heard_so_far + " " + caller)
     if made_up:
         fixes.append("made_up_detail")
         kept = [x for x in _sentences(text) if not any(a_ in x for a_ in made_up) and not x.endswith("?")]
@@ -245,10 +305,12 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     # 3. Days and times: only real free spots, only on working days.
     open_days = {d.lower() for d in a.get("open_days", [])}
     # A time with no day takes its day from the call: what the caller just said, then her last reply, then earlier.
-    refused = {m.group(1).lower() for m in re.finditer(r"\b(?:not|no|can't do|cannot do|can't make)\s+(?:on\s+)?" + DAY, caller, re.I)}
-    caller_days = [m.group(1).lower() for m in re.finditer(DAY, caller, re.I) if m.group(1).lower() not in refused]
+    refused_now = refused_days(caller)
+    caller_days = [m.group(1).lower() for m in re.finditer(DAY, caller, re.I) if m.group(1).lower() not in refused_now]
+    refused = (refused_days(heard_so_far) | refused_now) - set(caller_days)     # "Thursday then" later takes it back
     recent_days = caller_days[-1:] if caller_days else [   # the day the caller last named wins outright
-        m.group(1).lower() for src in (last_reply, heard_so_far) for m in reversed(list(re.finditer(DAY, src, re.I)))]
+        m.group(1).lower() for src in (last_reply, heard_so_far) for m in reversed(list(re.finditer(DAY, src, re.I)))
+        if m.group(1).lower() not in refused]
     free_now = None if diary is None else {(d.lower(), _norm_time(t)) for d, t in diary}
 
     def which_day(t):
@@ -262,20 +324,53 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         day, t = s
         if not day or day == "?":       # no day she or the caller named, or "tomorrow" without a date: can't check it
             return free is None and not open_days
-        return (free is None or s in free) and (not open_days or day in open_days)
+        return (free is None or s in free) and (not open_days or day in open_days) and day not in refused
     bad_slot = any(not slot_ok(s) for s in offered)
     if offered and free is None:
         bad_slot = True          # she can't see the diary, so she can't offer a time
     if bad_slot:
         fixes.append("time")
         if diary:
-            d, t = diary[0]
+            d, t = next(((d, t) for d, t in diary if d.lower() not in refused), diary[0])
             asked = SLOT.search(caller)     # tell the caller why, if they asked for a spot that isn't free
             why = f"Sorry, {asked.group(1).capitalize()} at {asked.group(2)} isn't free. " if asked else ""
             text = f"{why}The next free spot is {d} at {t}. Would that suit?"
         else:
             text = (f"I can't see the diary just now, so I won't guess a time. What day suits you best, "
                     f"and I'll have {owner} confirm it?")
+
+    # 3b. Opening hours: only the card's.
+    card_hours = TIME_RANGE.search(a.get("open_hours", "") or "")
+    if card_hours:
+        def _nt(t, ref):
+            if not re.search(r"[ap]\.?m", t, re.I):
+                suffix = re.search(r"([ap])\.?m", ref, re.I)
+                t += (suffix.group(1) + "m") if suffix else ""
+            return _norm_time(t) if re.search(r"[ap]m", t.replace(".", ""), re.I) else t
+        ct = re.findall(_T, card_hours.group(0))
+        c_open, c_close = _nt(ct[0], ct[-1]), _nt(ct[-1], ct[-1])
+
+        def wrong_hours(sentence):
+            if not HOURS_TALK.search(sentence) and not re.search(r"\bwe work\b", sentence, re.I):
+                return False
+            for rng in TIME_RANGE.finditer(sentence):
+                ts = re.findall(_T, rng.group(0))
+                if (_nt(ts[0], ts[-1]), _nt(ts[-1], ts[-1])) != (c_open, c_close):
+                    return True
+            for m in re.finditer(r"\b(open(?:s)?|close[sd]?|closes|shut|finish(?:es)?)\s+(?:at\s+)?(" + _T + r")(?![\w:])", sentence, re.I):
+                want = c_open if m.group(1).lower().startswith("open") else c_close
+                if _nt(m.group(2), m.group(2)) != want:
+                    return True
+            return False
+        hours_parts = _sentences(text)
+        if any(wrong_hours(x) for x in hours_parts):
+            fixes.append("hours")
+            asked = any(wrong_hours(x) and x.endswith("?") for x in hours_parts)
+            kept = [x if not wrong_hours(x) else f"We work {a['open_hours']}." for x in hours_parts]
+            if asked and diary:
+                d, t = next(((d, t) for d, t in diary if d.lower() not in refused), diary[0])
+                kept.append(f"The next free spot is {d} at {t}. Would that suit?")
+            text = " ".join(dict.fromkeys(kept))
 
     # 6. If she asks "what time suits?" while free spots are in front of her, offer one instead.
     if diary and not offered and ASK_WHEN.search(text):
@@ -338,7 +433,8 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         text = " ".join(parts)
     if len(parts) > MAX_SENTENCES:
         # Keep any sentence carrying a number, address or time (a read-back), and her last question.
-        chosen = {i for i, x in enumerate(parts) if re.search(r"\d|\b(?:unit|flat|apartment)\b", x, re.I) or offered_slots(x)}
+        chosen = {i for i, x in enumerate(parts)
+                  if re.search(r"\d|\b(?:unit|flat|apartment)\b", x, re.I) or STREET.search(x) or offered_slots(x)}
         last_q = next((i for i in range(len(parts) - 1, -1, -1) if parts[i].endswith("?")), None)
         chosen.add(last_q if last_q is not None else MAX_SENTENCES - 1)
         for i in range(len(parts)):

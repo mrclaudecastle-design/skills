@@ -431,6 +431,48 @@ class Guard(unittest.TestCase):
         g = guard("Great, 123 Main Street it is.", caller="yes", last_reply="So that's 123 Main Street.", have_number=True)
         self.assertIn("made_up_detail", g.fixes)
 
+    def test_launch_thread_v14_faults(self):
+        """Faults found when the launch thread replayed real replies through v14 (24 Nov 2026)."""
+        from guard import spoken_numbers
+        card = ShopCard.load(Path(__file__).resolve().parent.parent / "shop" / "examples" / "birch-and-co.json")
+        diary = [("Tuesday", "9:30am"), ("Thursday", "4pm"), ("Friday", "11:00am")]
+        # 1, 2. Spoken numbers.
+        self.assertEqual(spoken_numbers("unit two, three Smith Street"), "unit 2, 3 Smith Street")
+        self.assertEqual(spoken_numbers("oh four twelve, three four five, six seven eight"), "0412345678")
+        self.assertIn("made_up_detail", guard("So that's Unit 23 Smith Street.", caller="unit two, three Smith Street", have_number=True).fixes)
+        self.assertNotIn("need_number", guard("Dave will call you back.", caller="oh four twelve, three four five, six seven eight").fixes)
+        # 3. Refusals in other words, and from earlier in the call.
+        for no in ("Thursday's no good.", "I can't come Thursday."):
+            g = guard("Sure, I've got you down for 4pm.", caller="What else have you got?", heard_so_far=no,
+                      last_reply="How about Thursday at 4pm?", diary=diary, have_number=True)
+            self.assertIn("time", g.fixes, no)
+            self.assertNotIn("Thursday", g.text, no)
+        self.assertNotIn("time", guard("Great, Thursday at 4pm it is.", caller="Actually, Thursday then.", heard_so_far="Thursday's no good.",
+                                       diary=diary, have_number=True).fixes)
+        # 4. "An opening" is an offer.
+        self.assertIn("time", guard("We have an opening at 10 am.", diary=diary).fixes)
+        # 5, 8. Opening hours must match the card (7am to 4pm).
+        self.assertIn("hours", guard("We're open 7am to 9pm.", card=card, diary=diary).fixes)
+        self.assertNotIn("hours", guard("We're open 7am to 4pm.", card=card, diary=diary).fixes)
+        g = guard("We close at 3 pm, so how about then?", card=card, diary=diary)
+        self.assertIn("hours", g.fixes)
+        self.assertIn("4pm", g.text)
+        self.assertIn("time", guard("You can come from 11 am, Tuesday suits.", diary=diary).fixes)
+        self.assertIn("time", guard("Tuesday from 10 to 11 am works.", diary=diary).fixes)
+        # 6, 7. Addresses in parts.
+        self.assertIn("made_up_detail", guard("So that's number 24, Ocean Street.", caller="twenty two Ocean Street", have_number=True).fixes)
+        self.assertIn("made_up_detail", guard("So that's Unit 22, number 22 Ocean Street.", caller="unit two, twenty two Ocean Street",
+                                              have_number=True).fixes)
+        self.assertNotIn("made_up_detail", guard("Is that 21 Bay Street, Unit 5?", caller="Unit five, Number twenty one. Bay Street",
+                                                 have_number=True).fixes)
+        # 9. A long read-back keeps a street number said in words.
+        g = guard("Lovely. Thanks for that. So that's twenty one Bay Street. Dave will see you Thursday at 4pm. Anything else?",
+                  caller="twenty one Bay Street", diary=diary, have_number=True)
+        self.assertIn("Bay Street", g.text)
+        # 10. Re-asking with the caller's correction is not a repeat.
+        last = "So that's 12 Harborview Street?"
+        self.assertNotIn("repeat", guard(last, caller="No, I said Harborview", last_reply=last, have_number=True).fixes)
+
     def test_spoken_numbers(self):
         from guard import spoken_numbers
         self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")
