@@ -61,11 +61,19 @@ STREET_TYPES = (r"(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Cre
                 r"Terrace|Tce|Lane|Ln|Boulevard|Blvd|Close|Way)")
 STREET = re.compile(r"\b((?:[A-Z][\w']+ ){1,3}" + STREET_TYPES + r")\b")
 HOUSE_NUMBER = re.compile(r"(?<![\d:/])\d{1,4}[a-z]?(?![\d:])", re.I)
-REFUSE_BEFORE = re.compile(r"\b(?:not(?!\s+(?:bad|till|until))|no(?!\s+(?:worries|problem|dramas|probs))|"
+REFUSE_BEFORE = re.compile(r"\b(?:not(?!\s+(?:bad|till|until))|no(?=\s+(?:on\s+)?" + DAY + r")|"
                            r"(?:can't|cannot|can not|couldn't|won't)(?!\s+you\b))\b"
                            r"(?:\s+(?!till\b|until\b|before\b|after\b|by\b|from\b)[\w']+){0,3}?\s+(?:on\s+)?" + DAY, re.I)
+REFUSE_BUSY = re.compile(r"\b(?:flat out|busy|away|tied up|booked up|out of town|anything but|except|other than|apart from)\s+(?:on\s+)?" + DAY, re.I)
 REFUSE_AFTER = re.compile(DAY + r"(?:'s|\s+is)?\s+(?:no good|not good|out|no go|a no|not great|bad|no use)\b|"
                           + DAY + r"\s+(?:doesn't|does not|won't|wouldn't|isn't)\b(?!\s+(?:too\s+)?bad)", re.I)
+BOOKED = re.compile(r"\b(?:i've|i have|we've|we have)\s+(?:booked|got you (?:down|in|booked)|locked (?:you|that|it) in|pencilled)|"
+                    r"\byou're (?:all )?(?:booked|set|locked in)\b|\bbooked (?:you|that|it) in\b|\bthat's (?:booked|locked in)\b|"
+                    r"\bi'll (?:book|lock|pop) (?:you|that|it) in\b", re.I)
+YES = re.compile(r"^\W*(?:yes|yeah|yep|yup|correct|that's right|that's it|spot on|perfect|sounds good|sure|ok|okay|all good|"
+                 r"too easy|lovely|right|bang on|that's correct)\b(?!\W*(?:but|no|not|wait))", re.I)
+ADDRESS_SAID = re.compile(r"(?:\b(?:unit|flat)\s*\d{1,4}[a-z]?,?\s*)?(?:\bnumber\s*)?(?<![\d/])\d{1,4}[a-z]?(?:/\d{1,4})?,?\s+"
+                          r"(?:[a-z']+\s+){0,3}[a-z']*" + r"(?:street|road|avenue|drive|court|place|crescent|highway|parade|terrace|lane|boulevard|close|way|st|rd|ave|dr|ct|pl|cres)\b", re.I)
 MAX_SENTENCES = 3
 
 _UNITS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine".split())}
@@ -100,6 +108,8 @@ def spoken_numbers(text: str) -> str:
             run.append(str(n) * repeat); repeat = 1; unit[0] = False
         elif lw in _TEENS:
             run.append(str(_TEENS[lw]) * repeat); repeat = 1; unit[0] = False
+        elif lw == "a" and re.match(r"\s+(?:hundred|thousand)\b", "".join(words[i + 1:i + 3]).lower()):
+            run.append("1"); unit[0] = False                   # "a hundred and six"
         elif lw in ("hundred", "thousand") and run and not run[-1].startswith("0"):
             scale = 100 if lw == "hundred" else 1000
             base = int(run.pop()) * scale
@@ -137,7 +147,7 @@ def spoken_numbers(text: str) -> str:
             # "oh four one two, three four five" and "oh four twelve, ..." are one phone number;
             # "unit two, three Smith Street" and "unit three, forty seven" are two numbers.
             so_far = "".join(run)
-            phone_like = so_far.startswith("0") or len(so_far) >= 4
+            phone_like = (so_far.startswith("0") or len(so_far) >= 4) and len(so_far) < 10   # a full phone number ends at 10
             digit_word = nxt in _UNITS or nxt in ("double", "triple")
             join = (phone_like and (digit_word or nxt in _TEENS or nxt in _TENS)) or nxt in ("hundred", "thousand")   # "unit two three" stays "2 3": ask, don't guess
             if not join:
@@ -216,34 +226,105 @@ def _street_heard(street: str, heard: str) -> bool:
     return any(SequenceMatcher(None, core, hay[i:i + n]).ratio() >= 0.85 for i in range(0, max(1, len(hay) - n + 1)))
 
 
+_TYPE_WORDS = r"(?:street|st|road|rd|avenue|ave|drive|dr|court|ct|place|pl|crescent|cres|highway|hwy|parade|pde|terrace|tce|lane|ln|boulevard|blvd|close|way)"
+_UNIT_RX = re.compile(r"\b(?:unit|flat|apartment|apt)\s*(?:number\s*|no\.?\s*)?(\d{1,4}[a-z]?)\b", re.I)
+_SLASH_RX = re.compile(r"(?<![\d/])(\d{1,4}[a-z]?)\s*/\s*(\d{1,4}[a-z]?)(?![\d/])", re.I)
+_HOUSE_WORD_RX = re.compile(r"\b(?:street number|house number|number|no\.)\s*(?:is\s+|was\s+|'s\s+)?(\d{1,4}[a-z]?)\b", re.I)
+_HOUSE_BEFORE_RX = re.compile(r"(?<![\d/])((?:\d\s){1,3}\d|\d{1,4}[a-z]?),?\s+(?:[a-z']+\s+){0,3}[a-z']*" + _TYPE_WORDS + r"\b", re.I)
+
+
+def address_numbers(text: str) -> tuple[set, set, list]:
+    """(unit numbers, house numbers, other numbers) in what was said.
+    'unit 3, 47 Ocean Street', '3/47 Ocean St', 'the street number is 47', 'three two one Ocean Road' (321)."""
+    units, houses = set(), set()
+    for m in _SLASH_RX.finditer(text):
+        units.add(m.group(1).lower()); houses.add(m.group(2).lower())
+    for m in _UNIT_RX.finditer(text):
+        units.add(m.group(1).lower())
+    for m in _HOUSE_WORD_RX.finditer(text):
+        houses.add(m.group(1).lower())
+    for m in _HOUSE_BEFORE_RX.finditer(text):
+        n = m.group(1).lower()
+        if re.search(r"\b(?:unit|flat|apartment|apt)\s*(?:number\s*)?$", text[:m.start(1)], re.I) or "/" in text[max(0, m.start(1) - 2):m.start(1)]:
+            continue                                    # that's the unit, said right before the street
+        houses.add(n.replace(" ", ""))
+        houses.update(n.split())                        # "three two one" may be 321 or not: allow either reading
+    tagged = units | houses
+    others = [n.lower() for n in HOUSE_NUMBER.findall(text) if n.lower() not in tagged]
+    return units, houses, others
+
+
+def _street_heard(street: str, heard: str) -> bool:
+    """Was this street said anywhere in the call, allowing run-together words ('Wattlestreet')
+    and small spelling differences ('Harborview' / 'Harbour View')? Street type must match if said."""
+    from difflib import SequenceMatcher
+    type_m = re.search(r"\s+(" + STREET_TYPES + r")$", street)
+    core = _compact(street[:type_m.start()] if type_m else street)
+    want_type = _compact(type_m.group(1)) if type_m else ""
+    hay = _compact(heard)
+    if not core:
+        return False
+    if len(core) < 6:                                   # short names must be whole words: "Park" is not "parking"
+        words = re.sub(r"\s+" + STREET_TYPES + r"$", "", street).split()
+        if not re.search(r"\b" + r"\s*".join(map(re.escape, (w.lower() for w in words))) + r"\b", heard.lower()):
+            return False
+    spots = [i for i in range(len(hay)) if hay.startswith(core, i)]
+    n = len(core)
+    if not spots and n >= 5:
+        spots = [i for i in range(0, max(1, len(hay) - n + 1)) if SequenceMatcher(None, core, hay[i:i + n]).ratio() >= 0.85]
+    if not spots:
+        return False
+    full_types = {_compact(t) for t in STREET_TYPES.strip("(?:)").split("|")}
+    for i in spots:                                     # the type said after it, if any, must be the same
+        after = hay[i + n:i + n + 12]
+        said_type = next((t for t in sorted(full_types, key=len, reverse=True) if after.startswith(t)), "")
+        if not said_type or not want_type or said_type == want_type:
+            return True
+    return False
+
+
 def made_up_streets(reply: str, heard: str) -> list[str]:
     """Street names in the reply that the caller never said, or said with other numbers.
-    The street may come anywhere in the call, and each number (house, unit) anywhere too,
-    as long as she doesn't use a number more often than the caller said it:
-    'Unit 22, number 22 Ocean Street' after 'unit two, twenty two Ocean Street' is caught."""
-    from collections import Counter
+    Units must be numbers the caller gave as a unit and house numbers ones given as a house number:
+    'Unit 47, number 3' for 'unit 3, 47', 'Unit 3' after '3 taps leaking', or 'Unit 22, number 22'
+    for '22 Ocean Street' are caught. Street and numbers may come in different turns."""
     said = re.sub(r"\b(the|that|this|which|any|every|no|some) one\b", r"\1 _", reply, flags=re.I)
-    r, h = _mask(spoken_numbers(said)), _mask(spoken_numbers(heard))
-    heard_numbers = Counter(n.lower() for n in HOUSE_NUMBER.findall(h))
+    said = spoken_numbers(said)
+    r, h = _mask(said), _mask(spoken_numbers(heard))
+    h_units, h_houses, h_other = address_numbers(h)
     bad = []
-    for m in STREET.finditer(reply):
-        if not _street_heard(m.group(1), heard):
-            bad.append(m.group(1))
+    for m in STREET.finditer(said):
+        name = m.group(1)
+        if not _street_heard(name, heard):
+            bad.append(name)
             continue
-        # where this street sits in the converted reply, to find its numbers
-        at = r.find(m.group(1))
-        mine = Counter(_numbers_near(r, at, at + len(m.group(1)), 30, 20, True)) if at >= 0 else Counter()
-        if mine - heard_numbers:
-            bad.append(m.group(1))
+        # the numbers that go with this street: the same sentence, up to 40 characters before and 25 after
+        lo = max(0, m.start() - 40)
+        cut = list(re.finditer(r"[.!?]\s", r[lo:m.start()]))
+        lo = lo + cut[-1].end() if cut else lo
+        window = re.split(r"[.!?]", r[lo:m.end() + 25])[0]
+        units, houses, other = address_numbers(window)
+        ok = units <= h_units and all(x in h_houses or (not h_houses and x in h_other) for x in houses) \
+            and all(x in h_units | h_houses | set(h_other) for x in other)
+        if not ok:
+            bad.append(name)
     return bad
 
 
 def refused_days(text: str) -> set:
-    """Days the caller has said no to: 'not Thursday', 'Thursday's no good', 'I can't come Thursday'."""
+    """Days the caller has said no to: 'not Thursday', 'Thursday's no good', 'I can't come Thursday',
+    'I'm flat out Thursday', 'anything but Thursday'. Questions like 'Can't Dave do Thursday?' are not refusals."""
     days = set()
-    for rx in (REFUSE_BEFORE, REFUSE_AFTER):
-        for m in rx.finditer(text):
-            days.add((m.group(1) or m.group(2) or "").lower() if rx is REFUSE_AFTER else m.group(1).lower())
+    for sentence in _sentences(text):
+        question = sentence.rstrip().endswith("?")
+        for m in REFUSE_BEFORE.finditer(sentence):
+            if question and re.match(r"(?:can't|cannot|can not|couldn't|won't)", m.group(0), re.I):
+                continue
+            days.add(m.groups()[-1].lower())
+        for m in REFUSE_BUSY.finditer(sentence):
+            days.add(m.group(1).lower())
+        for m in REFUSE_AFTER.finditer(sentence):
+            days.add((m.group(1) or m.group(2) or "").lower())
     return days - {""}
 
 
@@ -254,6 +335,12 @@ def offered_slots(text: str, context_day: str = "", today: str | None = None) ->
     'today'/'tomorrow' with no `today` given comes back as '?', which can't be checked.
     Talk about opening hours ('open 7am to 5pm') is not an offer."""
     found = []
+    text = spoken_numbers(text)
+    def _ampm(n):                                    # "ten on Tuesday" -> 10am, "Tuesday at 2" -> 2pm
+        n = int(n)
+        return f"{n}{'am' if 7 <= n <= 11 else 'pm'}"
+    text = re.sub(DAY + r"(,? at )(\d{1,2})(?![\d:]|\s?[ap]\.?m|\s*(?:/|unit|street))", lambda m: m.group(1) + m.group(2) + _ampm(m.group(3)) if 1 <= int(m.group(3)) <= 12 else m.group(0), text, flags=re.I)
+    text = re.sub(r"\b(\d{1,2})(?![\d:]|\s?[ap]\.?m)(\s+on\s+" + DAY + r")", lambda m: _ampm(m.group(1)) + m.group(2) if 1 <= int(m.group(1)) <= 12 else m.group(0), text, flags=re.I)
     for sentence in _sentences(text):
         sentence = HOURS_PHRASE.sub(_hours_or_offer, TIME_RANGE.sub(_hours_or_offer, sentence))
         hits = list(SLOT_OR_TIME.finditer(sentence))
@@ -284,9 +371,17 @@ def is_urgent(text: str) -> bool:
     return bool(URGENT.search(text))
 
 
+NAME_LOWER = re.compile(r"\b(?:it's|its|it is|this is|my name is|my name's|name's)\s+([a-z]{2,})(?=\s*(?:[,.!?]|$|\s+(?:here|calling|speaking)\b))", re.I)
+NOT_NAME_WORDS = {"me", "just", "the", "about", "urgent", "leaking", "broken", "fine", "good", "okay", "ok", "here", "now", "today",
+                  "tomorrow", "true", "right", "correct", "wrong", "busy", "yes", "no", "not", "really", "that", "this", "it"}
+
+
 def caller_name(text: str) -> str | None:
     m = NAME.search(text)
-    return m.group(1) if m and m.group(1).split()[0] not in NOT_NAMES else None
+    if m and m.group(1).split()[0] not in NOT_NAMES:
+        return m.group(1)
+    m = NAME_LOWER.search(text)                # speech-to-text often comes in lower case: "its shane, ..."
+    return m.group(1).capitalize() if m and m.group(1).lower() not in NOT_NAME_WORDS and m.group(1).capitalize() not in NOT_NAMES else None
 
 
 @dataclass
@@ -352,6 +447,14 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         fixes.append("made_up_detail")
         kept = [x for x in _sentences(text) if not any(a_ in x for a_ in made_up) and not x.endswith("?")]
         text = " ".join(kept + ["What's the address for the job?"])
+
+    # 9b. Never read back a phone number the caller hasn't given (or the shop's own).
+    heard_digits = _digits(spoken_numbers(heard_so_far + " " + caller)) + "|" + _digits(str(a.get("phone", "")))
+    fake = [] if have_number else [m.group(0) for m in PHONE.finditer(text) if _digits(m.group(0)) not in heard_digits]
+    if fake:
+        fixes.append("made_up_detail")
+        kept = [x for x in _sentences(text) if not any(f in x for f in fake) and not x.endswith("?")]
+        text = " ".join(kept + ["What's the best number to reach you on?"])
 
     # 2. Prices: only the ones on the card.
     allowed = {_digits(str(v)) for v in (a.get("prices") or {}).values()}
@@ -433,6 +536,46 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
                 d, t = next(((d, t) for d, t in diary if d.lower() not in refused), diary[0])
                 kept.append(f"The next free spot is {d} at {t}. Would that suit?")
             text = " ".join(dict.fromkeys(kept))
+
+    # 3c. Booking: only after the caller says yes to a full read-back (day and time, name, number, address),
+    # with a free spot in the diary. Otherwise she reads back, or asks for what is still missing.
+    if BOOKED.search(text):
+        call = spoken_numbers(heard_so_far + " " + caller)
+        name = caller_name(heard_so_far + " " + caller) or caller_name(call)
+        phones = [m.group(0) for m in PHONE.finditer(call)]
+        addresses = [m.group(0) for m in ADDRESS_SAID.finditer(_mask(call))]
+        lr = last_reply or ""
+        lr_slots = [(d.lower(), _norm_time(t)) for d, t in offered_slots(lr, "", today)]
+        slot = next((s_ for s_ in lr_slots + offered if free is not None and s_ in free and s_[0] not in refused), None)
+        confirmed = (YES.search(caller) and lr.rstrip().endswith("?") and slot is not None and slot in lr_slots
+                     and (phones and _digits(phones[-1]) in _digits(lr) or have_number) and ADDRESS_SAID.search(lr))
+        if a.get("bookings", "book") != "book":
+            ask = f"I'll pass this to {owner} so he can lock in a time with you."
+        elif confirmed:
+            ask = None
+        elif diary is None:
+            ask = f"I can't see the diary just now, so I won't book it in yet. I'll have {owner} call you to lock in a time."
+        elif not name:
+            ask = "Can I grab your name?"
+        elif not phones and not have_number:
+            ask = "What's the best number to reach you on?"
+        elif not addresses:
+            ask = "What's the address for the job?"
+        elif slot is None:
+            d, t = next(((d, t) for d, t in diary if d.lower() not in refused), diary[0])
+            ask = f"The next free spot is {d} at {t}. Would that suit?"
+        else:
+            day = next(d for d, _ in diary if d.lower() == slot[0])
+            tm = next(t for d, t in diary if d.lower() == slot[0] and _norm_time(t) == slot[1])
+            ph = _digits(phones[-1]) if phones else ""
+            ph = f"{ph[:4]} {ph[4:7]} {ph[7:]}" if len(ph) == 10 and ph.startswith("04") else (phones[-1] if phones else "")
+            number = f" on {ph}" if ph else ""
+            ask = f"Just to check: {day} at {tm}, {name}{number}, at {addresses[-1].strip(' ,').title()}. Is that right?"
+        if ask:
+            fixes.append("booking")
+            kept = [x for x in _sentences(text) if not BOOKED.search(x) and not x.endswith("?") and not offered_slots(x)
+                    and not ((VAGUE_SOON.search(x) or SOON.search(x)) and DOING.search(x))]
+            text = " ".join(kept[:1] + [ask])
 
     # 6. If she asks "what time suits?" while free spots are in front of her, offer one instead.
     if diary and not offered and ASK_WHEN.search(text):

@@ -506,6 +506,58 @@ class Guard(unittest.TestCase):
         self.assertNotIn("hours", guard("We're open Monday to Friday, 7 to 5.", card=card).fixes)
         self.assertIn("hours", guard("We're open Monday to Friday, 7 to 9.", card=card).fixes)
 
+    def test_launch_thread_v16_faults(self):
+        """Faults found in the launch thread's v16 text check (24 Nov 2026)."""
+        from guard import spoken_numbers
+        diary = [("Tuesday", "9:30am"), ("Thursday", "2:00pm")]
+        # 1. Number words read back before the street.
+        self.assertNotIn("made_up_detail", guard("Is that Twenty Two Ocean Street?", caller="Twenty Two Ocean Street", have_number=True).fixes)
+        # 2. A phone number she made up.
+        self.assertIn("made_up_detail", guard("And your phone number is 0412 345 678?", caller="It's Shane").fixes)
+        # 3, 4. Numbers belong to their role.
+        self.assertIn("made_up_detail", guard("So that's Unit 3, 47 Ocean Street.", caller="47 Ocean Street",
+                                              heard_so_far="I've got 3 taps leaking.", have_number=True).fixes)
+        self.assertIn("made_up_detail", guard("So that's Unit 22, number 22 Ocean Street.", caller="22 Ocean Street",
+                                              heard_so_far="It's 22 Ocean Street.", have_number=True).fixes)
+        self.assertIn("made_up_detail", guard("So that's Unit 47, number 3 Ocean Street.", caller="unit 3, 47 Ocean Street", have_number=True).fixes)
+        # 5. Street type, and short names inside words.
+        self.assertIn("made_up_detail", guard("So that's 22 Ocean Road.", caller="22 Ocean Street", have_number=True).fixes)
+        self.assertIn("made_up_detail", guard("So that's 5 Park Street.", caller="5 Street, near the parking", have_number=True).fixes)
+        # 6. The same house number said twice.
+        self.assertNotIn("made_up_detail", guard("So that's number 22, at 22 Ocean Street.", caller="22 Ocean Street", have_number=True).fixes)
+        # 7. Spoken numbers.
+        self.assertEqual(spoken_numbers("a hundred and six"), "106")
+        self.assertNotIn("made_up_detail", guard("So that's 321 Ocean Road.", caller="three two one Ocean Road", have_number=True).fixes)
+        # 8. Refusals.
+        from guard import refused_days
+        self.assertEqual(refused_days("Can't Dave do Thursday?"), set())
+        self.assertEqual(refused_days("No, I'd like Thursday."), set())
+        self.assertEqual(refused_days("I'm flat out Thursday."), {"thursday"})
+        self.assertEqual(refused_days("Anything but Thursday."), {"thursday"})
+        # 9. Spoken and bare times.
+        self.assertIn("time", guard("I can do Tuesday at two pm.", diary=diary).fixes)
+        self.assertIn("time", guard("I can do ten on Thursday.", diary=diary).fixes)
+        self.assertNotIn("time", guard("I can do two on Thursday.", diary=diary).fixes)
+
+    def test_booking_only_after_yes_to_full_read_back(self):
+        card = ShopCard({"shop_name": "Birch and Co", "trade": "plumber", "owner_name": "Dave", "country": "au", "bookings": "book"})
+        diary = [("Tuesday", "9:30am"), ("Thursday", "2:00pm")]
+        heard = "It's Shane. 0412 345 678. 14 Banksia Crescent. Thursday works."
+        g = guard("Great, you're booked for Thursday at 2:00pm.", caller="Thursday works.", card=card, diary=diary,
+                  heard_so_far="It's Shane. 0412 345 678. 14 Banksia Crescent.", have_number=True)
+        self.assertEqual(g.fixes, ["booking"])
+        self.assertTrue(g.text.endswith("Just to check: Thursday at 2:00pm, Shane on 0412 345 678, at 14 Banksia Crescent. Is that right?"))
+        read_back = "Just to check: Thursday at 2:00pm, Shane on 0412 345 678, at 14 Banksia Crescent. Is that right?"
+        g = guard("Great, you're booked for Thursday at 2:00pm.", caller="Yes, that's right.", card=card, diary=diary,
+                  heard_so_far=heard, last_reply=read_back, have_number=True)
+        self.assertNotIn("booking", g.fixes)
+        g = guard("I've booked you in.", caller="Yep.", card=card, diary=None, heard_so_far=heard, last_reply=read_back, have_number=True)
+        self.assertIn("booking", g.fixes)
+        msg = ShopCard({"shop_name": "Birch and Co", "trade": "plumber", "owner_name": "Dave", "country": "au", "bookings": "message"})
+        g = guard("You're booked for Thursday at 2:00pm.", caller="Yes.", card=msg, diary=diary, heard_so_far=heard,
+                  last_reply=read_back, have_number=True)
+        self.assertIn("booking", g.fixes)
+
     def test_spoken_numbers(self):
         from guard import spoken_numbers
         self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")
@@ -515,7 +567,8 @@ class Guard(unittest.TestCase):
     def test_live_05_slips_are_caught(self):
         g = guard("I've booked Dave for Thursday 2:00pm. He'll be with you shortly.", caller="yeah Thursday's good",
                   diary=[("Thursday", "2:00pm")], have_number=True)
-        self.assertEqual((g.fixes, g.text), (["promise"], "I've booked Dave for Thursday 2:00pm."))
+        self.assertNotIn("shortly", g.text)           # and no booking yet: no name, number or address
+        self.assertEqual((g.fixes, g.text), (["booking"], "Can I grab your name?"))
         g = guard("Dave will call you as soon as he's back in the office.", have_number=True)
         self.assertEqual(g.text, "Dave will call you as soon as possible.")
         g = guard("We don't give prices over the phone, mate.", caller="just give me a number")
@@ -532,7 +585,8 @@ class Guard(unittest.TestCase):
                      heard_so_far="Hello, I have a blocked drain. Yes, Friday is fine.")
         self.assertIn("made_up_detail", out.fixes)
         self.assertNotIn("Main Street", out.text)
-        self.assertEqual(out.text, "So that's Linda Park on 0498 111 222. I've booked you for Friday at 11:00am. What's the address for the job?")
+        # No booking until the address is in and the caller says yes to the read-back.
+        self.assertEqual(out.text, "So that's Linda Park on 0498 111 222. What's the address for the job?")
         same = "Thanks, Shane, 14 Banksia Crescent. We'll have Dave out on Thursday 2:00pm. Is there anything else I can help with?"
         out = self.g(same, "0412 345 678.", heard_so_far="It's Shane, 14 Banksia Crescent.", last_reply=same)
         # The caller just gave a number, so this is not a repeat: the number is read back in front (launch thread, 24 Nov).
