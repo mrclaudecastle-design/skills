@@ -558,6 +558,45 @@ class Guard(unittest.TestCase):
                   last_reply=read_back, have_number=True)
         self.assertIn("booking", g.fixes)
 
+    def test_launch_thread_v17_faults(self):
+        """Faults found in the launch thread's v17 text check (24 Nov 2026)."""
+        from guard import caller_name, spoken_numbers
+        card = ShopCard({"shop_name": "Birch and Co", "trade": "plumber", "owner_name": "Dave", "country": "au", "bookings": "book"})
+        diary = [("Tuesday", "8am"), ("Thursday", "2:00pm")]
+        heard = "It's Shane. 0412 345 678. 14 Banksia Crescent. Thursday works."
+        # Booking: the read-back must carry the caller's own number and address.
+        for lr in ("Just to check: Thursday at 2:00pm, Shane, at 14 Banksia Crescent. Is that right?",
+                   "Just to check: Thursday at 2:00pm, Shane on 0499 999 999, at 14 Banksia Crescent. Is that right?",
+                   "Just to check: Thursday at 2:00pm, Shane on 0412 345 678, at 99 Elm Street. Is that right?"):
+            g = guard("Great, you're booked.", caller="Yes.", card=card, diary=diary, heard_so_far=heard, last_reply=lr, have_number=True)
+            self.assertIn("booking", g.fixes, lr)
+        good = "Just to check: Thursday at 2:00pm, Shane on 0412 345 678, at 14 Banksia Crescent. Is that right?"
+        for said in ("Your booking is confirmed.", "Dave's locked it in."):
+            self.assertIn("booking", guard(said, caller="Thursday works.", card=card, diary=diary, heard_so_far=heard).fixes, said)
+        for yes in ("That's all correct.", "Thanks."):
+            self.assertNotIn("booking", guard("You're booked.", caller=yes, card=card, diary=diary, heard_so_far=heard,
+                                              last_reply=good, have_number=True).fixes, yes)
+        # After a booking, saying so again is fine even though that spot has left the diary.
+        g = guard("You're all booked in for Thursday at 2:00pm.", caller="Thanks!", card=card, diary=[("Tuesday", "8am")],
+                  heard_so_far=heard, last_reply="Great, you're booked for Thursday at 2:00pm.", have_number=True)
+        self.assertEqual(g.fixes, [])
+        # A blank template is never read out.
+        self.assertIn("template", guard("Monday 8 am | [Name]").fixes)
+        # 1. An invented phone number, even once a number is known.
+        self.assertIn("made_up_detail", guard("So that's 0499 999 999?", caller="yes", heard_so_far="0412 345 678", have_number=True).fixes)
+        # 3. "It's Unit twelve" is not a name.
+        self.assertIsNone(caller_name("It's Unit twelve."))
+        # 4. Slash and over.
+        self.assertEqual(spoken_numbers("3 slash 47 Ocean Street"), "3/47 Ocean Street")
+        self.assertEqual(spoken_numbers("five over twenty one"), "5/21")
+        # 5. "We have one on Tuesday at 8 am" offers Tuesday at 8am, not 1pm.
+        self.assertNotIn("time", guard("We have one on Tuesday at 8 am.", diary=diary).fixes)
+        self.assertNotIn("time", guard("Dave has three on Thursday, but 2:00pm is free.", caller="Thursday?", diary=diary).fixes)
+        # 6. Clock words.
+        self.assertIn("time", guard("I can do ten o'clock Tuesday.", diary=diary).fixes)
+        self.assertIn("time", guard("I can do half past nine on Tuesday.", diary=diary).fixes)
+        self.assertNotIn("time", guard("I can do eight o'clock Tuesday.", diary=diary).fixes)
+
     def test_spoken_numbers(self):
         from guard import spoken_numbers
         self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")
