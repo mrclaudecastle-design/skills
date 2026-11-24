@@ -376,6 +376,39 @@ class Guard(unittest.TestCase):
         self.assertIn("made_up_detail", guard("So that's 7 Ocean Street.", caller="47 Ocean Street", have_number=True).fixes)
         self.assertIn("promise", guard("Dave\u2019ll ring you back today.", have_number=True).fixes)
 
+    def test_launch_thread_v10_faults(self):
+        """Faults found when the launch thread ran v10 in its call loop (24 Nov 2026)."""
+        from guard import spoken_numbers
+        diary = [("Tuesday", "8am"), ("Thursday", "2pm")]
+        # 1. Two numbers said with a comma stay two numbers.
+        self.assertEqual(spoken_numbers("Unit three, forty seven Ocean Street"), "Unit 3, 47 Ocean Street")
+        self.assertIn("made_up_detail", guard("So that's Unit 347 Ocean Street.", caller="Unit three, forty seven Ocean Street",
+                                              have_number=True).fixes)
+        self.assertNotIn("made_up_detail", guard("So that's Unit 3, 47 Ocean Street.", caller="Unit three, forty seven Ocean Street",
+                                                 have_number=True).fixes)
+        # 2. Opening hours are not an offered time.
+        g = guard("We're only open Monday to Friday, 7am to 5pm.", diary=diary, have_number=True)
+        self.assertNotIn("time", g.fixes)
+        # 3. A time with no day, or "tomorrow", is only fine when the day is known and free.
+        self.assertIn("time", guard("I can do 2pm.", diary=diary).fixes)
+        self.assertNotIn("time", guard("I can do 2pm.", caller="Thursday's good", diary=diary).fixes)
+        self.assertIn("time", guard("I can do tomorrow at 2pm.", diary=diary).fixes)
+        self.assertNotIn("time", guard("I can do tomorrow at 2pm.", diary=diary, today="Wednesday").fixes)
+        self.assertIn("time", guard("I can do tomorrow at 2pm.", diary=diary, today="Monday").fixes)
+        # 4. A corrected address said in parts is a re-read, and her question stays.
+        last = "So that's Unit 5, 21 Bay Street. Is that right?"
+        g = guard(last, caller="Unit five. Twenty one Bay Street.", last_reply=last, have_number=True)
+        self.assertNotIn("repeat", g.fixes)
+        self.assertTrue(g.text.endswith("Is that right?"))
+        # 5. An address already said counts as heard.
+        g = guard("Is that 21 Bay Street, Unit 5?", caller="yes", heard_so_far="it's unit five, twenty one Bay Street", have_number=True)
+        self.assertNotIn("made_up_detail", g.fixes)
+        # 6. Too long keeps an address said in parts.
+        g = guard("Lovely. That's Unit 5. At 21 Bay Street. Dave will see you Thursday at 2pm. Anything else?",
+                  caller="Unit five, twenty one Bay Street", diary=diary, have_number=True)
+        self.assertIn("Unit 5", g.text)
+        self.assertIn("21 Bay Street", g.text)
+
     def test_spoken_numbers(self):
         from guard import spoken_numbers
         self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")

@@ -70,6 +70,7 @@ def spoken_numbers(text: str) -> str:
     'oh four one two, three four five...' can be checked like written ones."""
     words = re.findall(r"[A-Za-z]+|\d+|[^\sA-Za-z\d]+|\s+", text)
     out, run, repeat, i = [], [], 1, 0
+    unit = [False]          # was the last piece a single digit word (digit-by-digit reading)?
 
     def flush():
         if run:
@@ -87,11 +88,11 @@ def spoken_numbers(text: str) -> str:
                 if k < len(words) and words[k].lower() in _UNITS and words[k].lower() not in ("oh", "o", "zero", "nought"):
                     n += _UNITS[words[k].lower()]
                     i = k
-            run.append(str(n) * repeat); repeat = 1
+            run.append(str(n) * repeat); repeat = 1; unit[0] = False
         elif lw in _TEENS:
-            run.append(str(_TEENS[lw]) * repeat); repeat = 1
+            run.append(str(_TEENS[lw]) * repeat); repeat = 1; unit[0] = False
         elif lw in _UNITS and not (lw == "o" and run == []):
-            run.append(str(_UNITS[lw]) * repeat); repeat = 1
+            run.append(str(_UNITS[lw]) * repeat); repeat = 1; unit[0] = True
         elif w.isdigit():                 # written digits stay exactly as written
             flush(); out.append(w)
         elif (w.isspace() or w in (",", "-")) and run:
@@ -99,9 +100,10 @@ def spoken_numbers(text: str) -> str:
             while k < len(words) and (words[k].isspace() or words[k] in (",", "-")):
                 k += 1
             nxt = words[k].lower() if k < len(words) else ""
-            if not (nxt in _UNITS or nxt in _TEENS or nxt in _TENS or nxt in ("double", "triple")):
-                flush(); out.append(w)
-            i = k - 1 if k > i + 1 else i
+            # "oh four one two, three four five" is one number; "unit three, forty seven" is two.
+            if not (unit[0] and (nxt in _UNITS or nxt in ("double", "triple"))):
+                flush(); out.extend(words[i:k])       # keep the gap exactly as said
+            i = k - 1
         else:
             flush(); out.append(w)
         i += 1
@@ -109,16 +111,35 @@ def spoken_numbers(text: str) -> str:
     return "".join(out)
 
 
-def offered_slots(text: str) -> list[tuple[str, str]]:
+HOURS_TALK = re.compile(r"\b(?:open|opening|hours|closed?|closes|shut)\b", re.I)
+TIME_RANGE = re.compile(r"\d(?:\s?[ap]\.?m\.?)?\s*(?:to|till|until|-|–)\s*\d", re.I)
+RELATIVE = re.compile(r"\b(today|tonight|this (?:arvo|afternoon|morning|evening)|tomorrow)\b", re.I)
+WEEK = "monday tuesday wednesday thursday friday saturday sunday".split()
+
+
+def offered_slots(text: str, context_day: str = "", today: str | None = None) -> list[tuple[str, str]]:
     """Every (day, time) offered, in either order: 'Tuesday at 9:30am', '10am on Tuesday',
-    'Tuesday at 9 or 11am'. A time with no day near it comes back with day ''."""
+    'Tuesday at 9 or 11am', 'tomorrow at 2pm' (needs `today`, a weekday name).
+    A time with no day comes back with context_day (a day said earlier), or '' if none.
+    'today'/'tomorrow' with no `today` given comes back as '?', which can't be checked.
+    Talk about opening hours ('open 7am to 5pm') is not an offer."""
     found = []
     for sentence in _sentences(text):
+        if HOURS_TALK.search(sentence) or TIME_RANGE.search(sentence):
+            continue
         hits = list(SLOT_OR_TIME.finditer(sentence))
-        last_day = ""
+        rel = RELATIVE.search(sentence)
+        if rel and not any(h.group(1) for h in hits):
+            word = rel.group(1).lower()
+            if today and today.lower() in WEEK:
+                n = WEEK.index(today.lower()) + (1 if word == "tomorrow" else 0)
+                context_day = WEEK[n % 7]
+            else:
+                context_day = "?"
+        last_day = context_day
         for n, m in enumerate(hits):
             if m.group(1):
-                last_day = m.group(1)
+                last_day = context_day = m.group(1)
                 continue
             nxt = hits[n + 1] if n + 1 < len(hits) else None
             gap = sentence[m.end():nxt.start()] if nxt else ""
@@ -159,12 +180,14 @@ def _sentences(text: str) -> list[str]:
 
 
 def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] | None = None,
-          have_number: bool = False, urgent: bool | None = None, heard_so_far: str = "", last_reply: str = "") -> Guarded:
+          have_number: bool = False, urgent: bool | None = None, heard_so_far: str = "", last_reply: str = "",
+          today: str | None = None) -> Guarded:
     """diary = free spots as (day, time) pairs, or None if she can't see it.
     have_number = True once the caller's number is known from earlier in the call.
     urgent = True if this call is an emergency (worked out from `caller` if left as None).
     heard_so_far = everything the caller has said earlier in this call.
-    last_reply = what Mila said on her previous turn."""
+    last_reply = what Mila said on her previous turn.
+    today = today's weekday name, so "tomorrow at 2pm" can be checked against the diary."""
     fixes, text = [], reply.strip()
     a = card.a if card else {}
     owner = a.get("owner_name", "the owner")
@@ -174,12 +197,11 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     text = text.replace("\u2019", "'").replace("\u2018", "'")
     caller = spoken_numbers(caller.replace("\u2019", "'").replace("\u2018", "'"))
     heard_so_far = spoken_numbers(heard_so_far.replace("\u2019", "'"))
-    everything_heard = (heard_so_far + " " + caller).lower()
+    everything_heard = (heard_so_far + " " + caller + " " + last_reply.replace("\u2019", "'")).lower()
 
     # 8. Never the same sentence twice in a row.
     # Reading back a detail the caller has just said again (a correction) is not a repeat.
-    is_read_back = any(_digits(m.group(0)) and _digits(m.group(0)) in _digits(caller)
-                       for m in list(PHONE.finditer(text)) + list(ADDRESS.finditer(text)))
+    is_read_back = bool(set(re.findall(r"\d+", text)) & set(re.findall(r"\d+", caller)))
     if last_reply and not is_read_back and re.sub(r"\W+", " ", text).strip().lower() == re.sub(r"\W+", " ", last_reply).strip().lower():
         fixes.append("repeat")
         text = "Thanks, I've got that."
@@ -209,12 +231,13 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
 
     # 3. Days and times: only real free spots, only on working days.
     open_days = {d.lower() for d in a.get("open_days", [])}
-    offered = [(d.lower(), _norm_time(t)) for d, t in offered_slots(text)]
+    said_day = next((m.group(1) for m in reversed(list(re.finditer(DAY, caller, re.I)))), "")
+    offered = [(d.lower(), _norm_time(t)) for d, t in offered_slots(text, said_day, today)]
     free = None if diary is None else {(d.lower(), _norm_time(t)) for d, t in diary}
     def slot_ok(s):
         day, t = s
-        if not day:                                       # a time with no day: it must at least be a free time
-            return free is None or any(t == ft for _, ft in free)
+        if not day or day == "?":       # no day she or the caller named, or "tomorrow" without a date: can't check it
+            return free is None and not open_days
         return (free is None or s in free) and (not open_days or day in open_days)
     bad_slot = any(not slot_ok(s) for s in offered)
     if offered and free is None:
@@ -291,7 +314,7 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         text = " ".join(parts)
     if len(parts) > MAX_SENTENCES:
         # Keep any sentence carrying a number, address or time (a read-back), and her last question.
-        chosen = {i for i, x in enumerate(parts) if PHONE.search(x) or ADDRESS.search(x) or offered_slots(x)}
+        chosen = {i for i, x in enumerate(parts) if re.search(r"\d|\b(?:unit|flat|apartment)\b", x, re.I) or offered_slots(x)}
         last_q = next((i for i in range(len(parts) - 1, -1, -1) if parts[i].endswith("?")), None)
         chosen.add(last_q if last_q is not None else MAX_SENTENCES - 1)
         for i in range(len(parts)):
