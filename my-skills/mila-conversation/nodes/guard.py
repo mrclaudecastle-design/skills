@@ -61,10 +61,11 @@ STREET_TYPES = (r"(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Cre
                 r"Terrace|Tce|Lane|Ln|Boulevard|Blvd|Close|Way)")
 STREET = re.compile(r"\b((?:[A-Z][\w']+ ){1,3}" + STREET_TYPES + r")\b")
 HOUSE_NUMBER = re.compile(r"(?<![\d:/])\d{1,4}[a-z]?(?![\d:])", re.I)
-REFUSE_BEFORE = re.compile(r"\b(?:not|no(?!\s+(?:worries|problem|dramas|probs))|can't|cannot|can not|couldn't|won't)\b"
-                           r"(?:\s+[\w']+){0,3}?\s+(?:on\s+)?" + DAY, re.I)
+REFUSE_BEFORE = re.compile(r"\b(?:not(?!\s+(?:bad|till|until))|no(?!\s+(?:worries|problem|dramas|probs))|"
+                           r"(?:can't|cannot|can not|couldn't|won't)(?!\s+you\b))\b"
+                           r"(?:\s+(?!till\b|until\b|before\b|after\b|by\b|from\b)[\w']+){0,3}?\s+(?:on\s+)?" + DAY, re.I)
 REFUSE_AFTER = re.compile(DAY + r"(?:'s|\s+is)?\s+(?:no good|not good|out|no go|a no|not great|bad|no use)\b|"
-                          + DAY + r"\s+(?:doesn't|does not|won't|wouldn't|isn't)\b", re.I)
+                          + DAY + r"\s+(?:doesn't|does not|won't|wouldn't|isn't)\b(?!\s+(?:too\s+)?bad)", re.I)
 MAX_SENTENCES = 3
 
 _UNITS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine".split())}
@@ -99,6 +100,31 @@ def spoken_numbers(text: str) -> str:
             run.append(str(n) * repeat); repeat = 1; unit[0] = False
         elif lw in _TEENS:
             run.append(str(_TEENS[lw]) * repeat); repeat = 1; unit[0] = False
+        elif lw in ("hundred", "thousand") and run and not run[-1].startswith("0"):
+            scale = 100 if lw == "hundred" else 1000
+            base = int(run.pop()) * scale
+            k = i + 1                                  # "nine hundred (and) ninety nine"
+            rest = re.match(r"((?:\s+and)?\s+)([a-z]+)(?:[\s-]+([a-z]+))?", "".join(words[k:k + 6]).lower())
+            if rest and re.match(r"[\s-]*(?:[a-z]+[\s-]+)?(?:hundred|thousand)\b", "".join(words[k:k + 6]).lower()[len(rest.group(1)):]):
+                rest = None                            # "three thousand four hundred": let "four hundred" come next
+            add, used = 0, ""
+            if rest and (rest.group(2) in _TEENS or rest.group(2) in _TENS or rest.group(2) in _UNITS) and rest.group(2) not in ("oh", "o"):
+                w2 = rest.group(2)
+                add = _TEENS.get(w2) or _TENS.get(w2) or _UNITS.get(w2, 0)
+                used = rest.group(1) + w2
+                if w2 in _TENS and rest.group(3) in _UNITS and rest.group(3) not in ("oh", "o", "zero"):
+                    add += _UNITS[rest.group(3)]
+                    used = rest.group(0)
+            if used:
+                consumed, j = 0, k
+                while consumed < len(used) and j < len(words):
+                    consumed += len(words[j]); j += 1
+                i = j - 1
+            if run and int(run[-1]) >= 1000 and int(run[-1]) % 1000 == 0 and base + add < 1000:
+                run[-1] = str(int(run[-1]) + base + add)
+            else:
+                run.append(str(base + add))
+            unit[0] = False
         elif lw in _UNITS and not (lw == "o" and run == []):
             run.append(str(_UNITS[lw]) * repeat); repeat = 1; unit[0] = True
         elif w.isdigit():                 # written digits stay exactly as written
@@ -113,8 +139,7 @@ def spoken_numbers(text: str) -> str:
             so_far = "".join(run)
             phone_like = so_far.startswith("0") or len(so_far) >= 4
             digit_word = nxt in _UNITS or nxt in ("double", "triple")
-            join = (phone_like and (digit_word or nxt in _TEENS or nxt in _TENS)) or \
-                   (unit[0] and digit_word and "," not in "".join(words[i:k]))
+            join = (phone_like and (digit_word or nxt in _TEENS or nxt in _TENS)) or nxt in ("hundred", "thousand")   # "unit two three" stays "2 3": ask, don't guess
             if not join:
                 flush(); out.extend(words[i:k])       # keep the gap exactly as said
             i = k - 1
@@ -164,19 +189,51 @@ def _numbers_near(text: str, start: int, end: int, before: int, after: int, cut_
     return [n.lower() for n in HOUSE_NUMBER.findall(head + " " + tail)]
 
 
+_FULL_TYPE = {"st": "street", "rd": "road", "ave": "avenue", "dr": "drive", "ct": "court", "pl": "place", "cres": "crescent",
+              "hwy": "highway", "pde": "parade", "tce": "terrace", "ln": "lane", "blvd": "boulevard"}
+
+
+def _compact(name: str) -> str:
+    """'Harbour View St' -> 'harborviewstreet': no spaces, full street type, harbour/harbor alike."""
+    words = re.findall(r"[a-z']+", name.lower())
+    words = [_FULL_TYPE.get(w, w) for w in words]
+    return re.sub(r"[^a-z]", "", "".join(words)).replace("our", "or")
+
+
+def _street_heard(street: str, heard: str) -> bool:
+    """Was this street said anywhere in the call, allowing run-together words ('Wattlestreet')
+    and small spelling differences ('Harborview' / 'Harbour View')?"""
+    from difflib import SequenceMatcher
+    core = _compact(re.sub(r"\s+" + STREET_TYPES + r"$", "", street))
+    hay = _compact(heard)
+    if not core:
+        return False
+    if core in hay:
+        return True
+    n = len(core)
+    if n < 5:
+        return False
+    return any(SequenceMatcher(None, core, hay[i:i + n]).ratio() >= 0.85 for i in range(0, max(1, len(hay) - n + 1)))
+
+
 def made_up_streets(reply: str, heard: str) -> list[str]:
-    """Street names in the reply whose numbers (house, unit) the caller never said with that street.
-    'Unit 22, number 22 Ocean Street' after 'unit two, twenty two Ocean Street' is caught;
-    'Is that 21 Bay Street, Unit 5' after 'Unit five, number twenty one. Bay Street' is fine."""
+    """Street names in the reply that the caller never said, or said with other numbers.
+    The street may come anywhere in the call, and each number (house, unit) anywhere too,
+    as long as she doesn't use a number more often than the caller said it:
+    'Unit 22, number 22 Ocean Street' after 'unit two, twenty two Ocean Street' is caught."""
     from collections import Counter
-    r, h = _mask(reply), _mask(spoken_numbers(heard))
+    said = re.sub(r"\b(the|that|this|which|any|every|no|some) one\b", r"\1 _", reply, flags=re.I)
+    r, h = _mask(spoken_numbers(said)), _mask(spoken_numbers(heard))
+    heard_numbers = Counter(n.lower() for n in HOUSE_NUMBER.findall(h))
     bad = []
     for m in STREET.finditer(reply):
-        mine = Counter(_numbers_near(r, m.start(), m.end(), 30, 20, True))
-        if not mine:
-            continue                     # a street name with no number is not a read-back
-        spots = [x for x in re.finditer(re.escape(m.group(1).lower()), h.lower())]
-        if not any(not (mine - Counter(_numbers_near(h, x.start(), x.end(), 45, 20, False))) for x in spots):
+        if not _street_heard(m.group(1), heard):
+            bad.append(m.group(1))
+            continue
+        # where this street sits in the converted reply, to find its numbers
+        at = r.find(m.group(1))
+        mine = Counter(_numbers_near(r, at, at + len(m.group(1)), 30, 20, True)) if at >= 0 else Counter()
+        if mine - heard_numbers:
             bad.append(m.group(1))
     return bad
 
@@ -276,7 +333,8 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     reply_caps = {w.lower() for w in re.findall(r"(?<![.!?]\s)(?<!^)\b[A-Z][a-z']{2,}", text)}
     caller_words = {w.lower() for w in re.findall(r"[A-Za-z']{3,}", caller)}
     is_read_back = bool(set(re.findall(r"\d+", text)) & set(re.findall(r"\d+", caller))) or bool(reply_caps & caller_words)
-    if last_reply and not is_read_back and re.sub(r"\W+", " ", text).strip().lower() == re.sub(r"\W+", " ", last_reply).strip().lower():
+    gave_detail = bool(re.search(r"\d", caller))
+    if last_reply and not is_read_back and not gave_detail and not text.rstrip().endswith("?") and re.sub(r"\W+", " ", text).strip().lower() == re.sub(r"\W+", " ", last_reply).strip().lower():
         fixes.append("repeat")
         text = "Thanks, I've got that."
 
@@ -355,7 +413,11 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
                 return False
             for rng in TIME_RANGE.finditer(sentence):
                 ts = re.findall(_T, rng.group(0))
-                if (_nt(ts[0], ts[-1]), _nt(ts[-1], ts[-1])) != (c_open, c_close):
+                if not re.search(r"[ap]\.?m", rng.group(0), re.I):       # "7 to 4": compare the hours only
+                    hour = lambda t: int(re.match(r"\d+", t).group(0)) % 12
+                    if (hour(ts[0]), hour(ts[-1])) != (hour(ct[0]), hour(ct[-1])):
+                        return True
+                elif (_nt(ts[0], ts[-1]), _nt(ts[-1], ts[-1])) != (c_open, c_close):
                     return True
             for m in re.finditer(r"\b(open(?:s)?|close[sd]?|closes|shut|finish(?:es)?)\s+(?:at\s+)?(" + _T + r")(?![\w:])", sentence, re.I):
                 want = c_open if m.group(1).lower().startswith("open") else c_close

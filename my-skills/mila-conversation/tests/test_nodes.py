@@ -473,6 +473,39 @@ class Guard(unittest.TestCase):
         last = "So that's 12 Harborview Street?"
         self.assertNotIn("repeat", guard(last, caller="No, I said Harborview", last_reply=last, have_number=True).fixes)
 
+    def test_launch_thread_v15_faults(self):
+        """Faults found in the launch thread's v15 text check (24 Nov 2026)."""
+        from guard import spoken_numbers
+        card = ShopCard({"shop_name": "Birch and Co", "trade": "plumber", "owner_name": "Dave", "country": "au", "open_hours": "7am to 5pm"})
+        diary = [("Tuesday", "9:30am"), ("Thursday", "4pm")]
+        # 1. Street and numbers in different sentences or turns.
+        g = guard("So that's Unit 3, 47 Ocean Street.", caller="No, it's Unit 3, and the street number is 47",
+                  heard_so_far="It's on Ocean Street.", have_number=True)
+        self.assertNotIn("made_up_detail", g.fixes)
+        g = guard("So that's 22 Ocean Street.", caller="The street is Ocean Street. Sorry, number 22.", have_number=True)
+        self.assertNotIn("made_up_detail", g.fixes)
+        # 2. Run-together or differently spelled streets.
+        self.assertNotIn("made_up_detail", guard("So that's 5 Wattle Street.", caller="five Wattlestreet", have_number=True).fixes)
+        self.assertNotIn("made_up_detail", guard("So that's 8 Harbour View Road.", caller="eight Harborview Road", have_number=True).fixes)
+        self.assertIn("made_up_detail", guard("So that's 8 Banksia Road.", caller="eight Harborview Road", have_number=True).fixes)
+        # 3. Not refusals.
+        for line in ("Can't you do Thursday?", "I won't be home till Thursday.", "Thursday isn't bad actually."):
+            g = guard("Sure, I've got you down for 4pm.", caller=line, diary=diary, have_number=True)
+            self.assertNotIn("time", g.fixes, line)
+        # 4. A made-up unit said in words.
+        self.assertIn("made_up_detail", guard("So that's Unit twenty two, number twenty two, Ocean Street.",
+                                              caller="unit two, twenty two Ocean Street", have_number=True).fixes)
+        # 5. A confirm question after "No." is not a repeat.
+        last = "So that's 12 Ocean Street, is that right?"
+        self.assertNotIn("repeat", guard(last, caller="No.", last_reply=last, heard_so_far="twelve Ocean Street", have_number=True).fixes)
+        # 6, 7. Spoken numbers.
+        self.assertEqual(spoken_numbers("unit two three Smith Street"), "unit 2 3 Smith Street")
+        self.assertEqual(spoken_numbers("nine hundred ninety nine"), "999")
+        self.assertEqual(spoken_numbers("three thousand four hundred and two"), "3402")
+        # 8. Hours with no am or pm that match the card.
+        self.assertNotIn("hours", guard("We're open Monday to Friday, 7 to 5.", card=card).fixes)
+        self.assertIn("hours", guard("We're open Monday to Friday, 7 to 9.", card=card).fixes)
+
     def test_spoken_numbers(self):
         from guard import spoken_numbers
         self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")
@@ -502,7 +535,9 @@ class Guard(unittest.TestCase):
         self.assertEqual(out.text, "So that's Linda Park on 0498 111 222. I've booked you for Friday at 11:00am. What's the address for the job?")
         same = "Thanks, Shane, 14 Banksia Crescent. We'll have Dave out on Thursday 2:00pm. Is there anything else I can help with?"
         out = self.g(same, "0412 345 678.", heard_so_far="It's Shane, 14 Banksia Crescent.", last_reply=same)
-        self.assertEqual((out.fixes, out.text), (["repeat", "read_back"], "So that's 0412 345 678."))
+        # The caller just gave a number, so this is not a repeat: the number is read back in front (launch thread, 24 Nov).
+        self.assertEqual(out.fixes, ["read_back"])
+        self.assertTrue(out.text.startswith("So that's 0412 345 678.") and "14 Banksia Crescent" in out.text)
         self.assertEqual(self.g("Got it, Shane, 14 Banksia Crescent.", "It's Shane, 14 Banksia Crescent.", have_number=True).fixes, [])   # a real address stays
         out = self.g("Yes, there's a call-out fee of $90. Is there anything else I can help with?", "Is there a call-out fee?")
         self.assertEqual((out.fixes, out.text), (["sign_off"], "Yes, there's a call-out fee of $90."))
