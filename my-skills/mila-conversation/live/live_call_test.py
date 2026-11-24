@@ -10,7 +10,9 @@ from the two result files it writes into --out (a new folder).
         --out /Volumes/02-WORK/MilaModels/runs/live-01 [--adapter-path ...]
 """
 import argparse
+import copy
 import json
+import re
 import sys
 import time
 from collections import Counter
@@ -48,6 +50,7 @@ def main():
     ap.add_argument("--card", default=str(ROOT / "shop" / "examples" / "birch-and-co.json"))
     ap.add_argument("--out", required=True)
     ap.add_argument("--max-tokens", type=int, default=120)
+    ap.add_argument("--no-cache", action="store_true", help="re-read the shop card on every reply (the old, slower way)")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -55,27 +58,57 @@ def main():
         sys.exit(f"{out} already has files. Pick a new --out folder so nothing is overwritten.")
     out.mkdir(parents=True, exist_ok=True)
 
-    from mlx_lm import generate, load
+    from mlx_lm import load, stream_generate
     card = ShopCard.load(args.card)
     system = card.instructions() + "\n- Free spots in the diary: " + "; ".join(f"{d} {t}" for d, t in DIARY) + ". Offer only these."
     t0 = time.perf_counter()
     model, tokenizer = load(args.model, adapter_path=args.adapter_path)
     load_s = time.perf_counter() - t0
 
-    results, fixes, lines = [], Counter(), [f"Model: {args.model}  adapter: {args.adapter_path}  load: {load_s:.1f}s", "", system, ""]
+    def render(messages):
+        try:
+            out = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True, enable_thinking=False)
+        except TypeError:
+            out = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=True)
+        return list(out["input_ids"] if hasattr(out, "keys") else out)
+
+    # Read the shop card once and keep it, so each reply only has to read the call so far.
+    warm, prefix, cache_note = None, [], "off"
+    if not args.no_cache:
+        try:
+            import mlx.core as mx
+            from mlx_lm.models.cache import make_prompt_cache
+            a = render([{"role": "system", "content": system}, {"role": "user", "content": "Hello"}])
+            b = render([{"role": "system", "content": system}, {"role": "user", "content": "What time is it?"}])
+            same = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+            prefix = a[:same]
+            warm = make_prompt_cache(model)
+            model(mx.array(prefix)[None], cache=warm)
+            mx.eval([c.state for c in warm])
+            cache_note = f"on ({len(prefix)} of the card's tokens read once)"
+        except Exception as e:                      # any trouble: carry on the old way and say so
+            warm, prefix, cache_note = None, [], f"off (could not set up: {e})"
+
+    results, fixes, lines = [], Counter(), [f"Model: {args.model}  adapter: {args.adapter_path}  load: {load_s:.1f}s  card kept ready: {cache_note}", "", system, ""]
     for name, caller_lines in CALLS.items():
         messages, have_number, urgent = [{"role": "system", "content": system}], False, False
         heard_so_far, last_reply = "", ""
         lines.append(f"=== {name} ===")
         for said in caller_lines:
             messages.append({"role": "user", "content": said})
-            try:
-                prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
-            except TypeError:
-                prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            tokens = render(messages)
             t = time.perf_counter()
-            brain = generate(model, tokenizer, prompt=prompt, max_tokens=args.max_tokens, verbose=False).strip()
+            cache, send = None, tokens
+            if warm is not None and tokens[:len(prefix)] == prefix:
+                cache, send = copy.deepcopy(warm), tokens[len(prefix):]   # the card is already read: only the call so far is new
+            brain, first = "", None
+            for part in stream_generate(model, tokenizer, send, max_tokens=args.max_tokens, **({"prompt_cache": cache} if cache else {})):
+                brain += part.text
+                if first is None and re.search(r"[.!?](?:\s|$)", brain):
+                    first = time.perf_counter() - t                  # when the voice could start speaking
             secs = time.perf_counter() - t
+            first = secs if first is None else first
+            brain = brain.strip()
             if "</think>" in brain:                      # in case thinking could not be switched off
                 brain = brain.split("</think>")[-1].strip()
             urgent = urgent or is_urgent(said)
@@ -85,15 +118,17 @@ def main():
             fixes.update(g.fixes)
             messages.append({"role": "assistant", "content": g.text})   # the call continues with what she really said
             results.append({"call": name, "caller": said, "caller_plain": understand(said, card.country)["plain"],
-                            "brain": brain, "spoken": g.text, "fixes": g.fixes, "seconds": round(secs, 2)})
-            lines += [f"caller: {said}", f" brain: {brain}"] + ([f"spoken: {g.text}   {g.fixes}"] if g.fixes else []) + [f"        ({secs:.1f}s)"]
+                            "brain": brain, "spoken": g.text, "fixes": g.fixes, "seconds": round(secs, 2), "first_sentence_seconds": round(first, 2)})
+            lines += [f"caller: {said}", f" brain: {brain}"] + ([f"spoken: {g.text}   {g.fixes}"] if g.fixes else []) + [f"        ({secs:.1f}s, first sentence {first:.1f}s)"]
         lines.append("")
 
     n = len(results)
     touched = sum(1 for r in results if r["fixes"])
     times = sorted(r["seconds"] for r in results)
+    firsts = sorted(r["first_sentence_seconds"] for r in results)
     summary = {"replies": n, "left_alone": n - touched, "fixed_by_guard": touched, "fixes_by_rule": dict(fixes),
-               "median_seconds": times[n // 2], "slowest_seconds": times[-1], "load_seconds": round(load_s, 1)}
+               "card_kept_ready": cache_note, "median_first_sentence_seconds": firsts[n // 2],
+               "slowest_first_sentence_seconds": firsts[-1], "median_seconds": times[n // 2], "slowest_seconds": times[-1], "load_seconds": round(load_s, 1)}
     lines += ["=== summary ===", json.dumps(summary, indent=2)]
     (out / "live-calls.txt").write_text("\n".join(lines) + "\n")
     (out / "live-calls.json").write_text(json.dumps({"summary": summary, "system": system, "results": results}, indent=2, ensure_ascii=False) + "\n")
