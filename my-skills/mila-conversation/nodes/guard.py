@@ -393,11 +393,13 @@ NOT_NAME_WORDS = {"unit", "flat", "number", "apartment", "level", "lot", "shop",
 
 
 def caller_name(text: str) -> str | None:
-    m = NAME.search(text)
-    if m and m.group(1).split()[0] not in NOT_NAMES:
-        return m.group(1)
-    m = NAME_LOWER.search(text)                # speech-to-text often comes in lower case: "its shane, ..."
-    return m.group(1).capitalize() if m and m.group(1).lower() not in NOT_NAME_WORDS and m.group(1).capitalize() not in NOT_NAMES else None
+    for m in NAME.finditer(text):              # "It's Unit twelve. I'm Joe Brown." -> Joe Brown
+        if m.group(1).split()[0] not in NOT_NAMES:
+            return m.group(1)
+    for m in NAME_LOWER.finditer(text):        # speech-to-text often comes in lower case: "its shane, ..."
+        if m.group(1).lower() not in NOT_NAME_WORDS and m.group(1).capitalize() not in NOT_NAMES:
+            return m.group(1).capitalize()
+    return None
 
 
 @dataclass

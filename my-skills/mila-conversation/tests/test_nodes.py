@@ -586,6 +586,7 @@ class Guard(unittest.TestCase):
         self.assertIn("made_up_detail", guard("So that's 0499 999 999?", caller="yes", heard_so_far="0412 345 678", have_number=True).fixes)
         # 3. "It's Unit twelve" is not a name.
         self.assertIsNone(caller_name("It's Unit twelve."))
+        self.assertEqual(caller_name("It's Unit twelve. I'm Joe Brown."), "Joe Brown")
         # 4. Slash and over.
         self.assertEqual(spoken_numbers("3 slash 47 Ocean Street"), "3/47 Ocean Street")
         self.assertEqual(spoken_numbers("five over twenty one"), "5/21")
