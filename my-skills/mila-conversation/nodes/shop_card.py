@@ -79,7 +79,7 @@ class ShopCard:
                  f"If you don't know, say so and offer to have {owner} call back.", "", "About this business:"]
         if a.get("area"):
             lines.append(f"- Covers: {a['area']}.")
-        lines.append(f"- Works {_listed(a['open_days'])}, {a['open_hours']}. Never offer a time outside these.")
+        lines.append(f"- Works {_listed([d.capitalize() for d in a['open_days']])}, {a['open_hours']}. Never offer a time outside these.")
         if a.get("services"):
             lines.append(f"- Main jobs: {_listed(a['services'])}.")
         if a.get("not_offered"):
@@ -89,6 +89,10 @@ class ShopCard:
                          + f". For the cost of a job itself, say it depends on the job and offer a call back from {owner}.")
         else:
             lines.append(f"- You have no prices. For any price question, offer a call back from {owner}.")
+        lines.append(f"- For a call back you only need the caller's name, number and what it's about. Don't ask for an address "
+                     f"and don't book the call back into the diary; {owner} rings back as soon as possible.")
+        lines.append(f"- Don't talk about who else works here. If asked to recommend another business, say kindly you can't, "
+                     f"and don't offer a call back for it.")
         lines.append("- You can book jobs into the diary." if a["bookings"] == "book"
                      else f"- You don't book jobs. Take the caller's name, number and what they need, and say {owner} will call back.")
         lines.append(f"- Urgent calls: {a['emergencies']}")
