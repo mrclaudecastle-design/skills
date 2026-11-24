@@ -28,6 +28,7 @@ COUNTRIES = {"au": "Australia", "ca": "Canada"}
 MANNERS = ("You are on a live phone call, so speak the way people talk: one or two short sentences, "
            "one question at a time, no lists. Understand everyday local expressions and go along with them warmly, "
            "but don't start using slang yourself. Read names, numbers, days and times back to confirm them. "
+           "When you read back an address, say every number the caller gave (unit and street number) and the street, exactly as they said them. "
            "Never invent a price, a time or a promise. When a day or time is needed, offer a free spot from the diary rather than asking "
            "what time suits. Once the caller picks a spot, read back the day, time, their name, address and number in one go, and "
            "book it only when they say yes to that. Don't say anyone will confirm it later. Don't say when someone will call or arrive unless these notes say so. Don't say goodbye until you have "
