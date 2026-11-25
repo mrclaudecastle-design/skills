@@ -70,7 +70,7 @@
     },
     {
       "name": "my-skills",
-      "description": "Our own skills for Mila AI: getting the models from Hugging Face and GitHub, voice testing, the brain, local image making, and plain-words house rules",
+      "description": "Our own skills for Mila AI: getting the models from Hugging Face and GitHub, voice testing, the brain, local image making, test and Mac-safety routines, and plain-words house rules",
       "source": "./",
       "strict": false,
       "skills": [
@@ -79,7 +79,11 @@
         "./my-skills/mila-brain",
         "./my-skills/owner-plain-words",
         "./my-skills/mila-conversation",
-        "./my-skills/mila-image-local"
+        "./my-skills/mila-image-local",
+        "./my-skills/quiet-mac-gate",
+        "./my-skills/call-replay-check",
+        "./my-skills/voice-line-check",
+        "./my-skills/safe-mac-work"
       ]
     }
   ]
