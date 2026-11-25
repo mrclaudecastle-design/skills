@@ -8,6 +8,7 @@ Our own skills library, kept next to Anthropic's (in `skills/`). Nothing in Anth
 | `mila-voice-test` | Compares voices and listening models for Australian accents and speed, and helps pick one |
 | `mila-brain` | Runs, teaches and improves Mila's brain (Qwen 3 8B), with the privacy rules for training |
 | `mila-conversation` | Small building blocks for natural calls: spoken numbers, Australian and Canadian talk, voting on what was meant, the "press 1" fallback, timing, and a Qwen training starter kit |
+| `mila-image-local` | Makes photo-real or stylised character pictures with local, open-source image models (ComfyUI + Z-Image-Turbo on a Mac, SSD-1B on CPU), with the lessons learned |
 | `owner-plain-words` | House rules for anything an owner or customer reads |
 
 ## Install in Claude Code
