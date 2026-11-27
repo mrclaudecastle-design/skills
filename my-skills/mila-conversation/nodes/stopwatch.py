@@ -35,7 +35,7 @@ class Stopwatch:
         return sum(self.times.values())
 
     def slow_steps(self) -> list[str]:
-        return [n for n, ms in self.times.items() if n in self.budget and ms > self.budget[n]]
+        return [n for n, ms in self.times.items() if self.budget.get(n) and ms > self.budget[n]]
 
     def report(self) -> str:
         lines = []

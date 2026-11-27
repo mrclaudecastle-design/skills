@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from plausibility import within_opening_days   # noqa: E402
+from guard import HUMAN_CLAIM, day_list, price_table   # noqa: E402
 
 QUESTIONS = json.loads((Path(__file__).resolve().parent.parent / "shop" / "questionnaire.json").read_text())["questions"]
 COUNTRIES = {"au": "Australia", "ca": "Canada"}
@@ -43,9 +44,54 @@ def _listed(items) -> str:
 
 class ShopCard:
     def __init__(self, answers: dict):
+        answers = answers if isinstance(answers, dict) else {}
         self.given = {k: v for k, v in answers.items() if v not in (None, "", [], {})}
+        self.problems = []                      # answers she couldn't make sense of, in the owner's words
+        self._tidy()
         self.a = {q["id"]: q["default"] for q in QUESTIONS if "default" in q}
         self.a.update(self.given)
+
+    def _tidy(self):
+        """Owners type answers every which way. Put each one into the shape the rest of the kit expects,
+        and note the ones that can't be read rather than guessing."""
+        g, asks = self.given, {q["id"]: q["ask"] for q in QUESTIONS}
+        for key in ("shop_name", "trade", "owner_name", "area", "open_hours", "emergencies", "greeting", "extra"):
+            if key in g and not isinstance(g[key], str):
+                g[key] = ", ".join(str(x) for x in g[key]) if isinstance(g[key], (list, tuple)) else str(g[key])
+            if key in g:
+                g[key] = re.sub(r"[\x00-\x1f]+", " ", g[key]).strip()
+                if not g[key]:
+                    del g[key]
+        for key in ("country", "bookings"):
+            if key in g:
+                g[key] = str(g[key]).strip().lower()
+        if "country" in g:
+            g["country"] = {"australia": "au", "aus": "au", "canada": "ca", "can": "ca"}.get(g["country"], g["country"])
+        if "open_days" in g:
+            days = day_list(g["open_days"])
+            if days:
+                g["open_days"] = days
+            else:
+                self.problems.append(f"{asks['open_days']} (I couldn't read the days, please list them, like Monday to Friday)")
+                del g["open_days"]
+        for key in ("services", "not_offered"):
+            if key in g and isinstance(g[key], str):
+                g[key] = [x.strip() for x in re.split(r",|;|\n|\band\b", g[key]) if x.strip()]
+            elif key in g and isinstance(g[key], (list, tuple, set)):
+                g[key] = [str(x).strip() for x in g[key] if str(x).strip()]
+            elif key in g:
+                del g[key]
+        if "prices" in g:
+            table = price_table({"prices": g["prices"]})
+            if isinstance(g["prices"], dict) and all(table.get(str(k)) for k in g["prices"]):
+                g["prices"] = {str(k): str(v) for k, v in g["prices"].items()}
+            elif table and all(table.values()) and not isinstance(g["prices"], dict):
+                raw = g["prices"] if isinstance(g["prices"], (list, tuple, set)) else [x for x in re.split(r"[;\n]|,(?!\d{3})", str(g["prices"])) if x.strip()]
+                g["prices"] = dict(zip(table, (re.search(r"(?:AU|CA|US|NZ|A|C)?\$?\s?\d[\d,]*(?:\.\d{1,2})?", str(x)).group(0).strip() for x in raw)))
+                g["prices"] = {k: (v if v.startswith(("$", "A", "C", "U", "N")) else "$" + v) for k, v in g["prices"].items()}
+            else:                               # a price she can't read is a price she must never say
+                self.problems.append(f"{asks['prices']} (I couldn't read these, so I won't say any price until they're fixed. Write each as: what it's for, then the amount)")
+                del g["prices"]
 
     @classmethod
     def load(cls, path):
@@ -60,16 +106,31 @@ class ShopCard:
                 problems.append(f"{q['ask']} (pick one of: {', '.join(q['choices'])})")
         return problems
 
+    def warnings(self) -> list[str]:
+        """Answers she couldn't read, for the owner to fix. They don't stop her taking calls:
+        she falls back to the safe choice (no prices said, the usual working days)."""
+        return list(self.problems)
+
     @property
     def country(self) -> str:
         return self.a.get("country", "au")
 
     def greeting(self) -> str:
-        g = self.a["greeting"].format(shop_name=self.a.get("shop_name", ""))
-        if not re.search(r"\bAI\b", g):        # callers are always told she's an AI, whatever the shop wrote
-            g = re.sub(r"\bMila\b", "Mila, the AI receptionist", g, count=1) if re.search(r"\bMila\b", g) \
-                else g.rstrip() + " This is Mila, the AI receptionist."
-        return g
+        name = str(self.a.get("shop_name", ""))
+        default = next(q["default"] for q in QUESTIONS if q["id"] == "greeting")
+        template = str(self.a.get("greeting") or default)
+        if HUMAN_CLAIM.search(template) or re.search(r"\b(?:not|isn't|no) (?:an? )?(?:AI|robot|bot|machine|computer)\b", template, re.I) \
+                or re.search(r"[{}]", template.replace("{shop_name}", "")):
+            template = default                 # a greeting may never say she's a person, and odd blanks aren't read out
+        mark = "\x00"
+        rest = template.replace("{shop_name}", mark)           # only that one blank is filled; nothing else is run
+        rest = re.sub(r"\{[^{}]*\}", "", rest).replace("{", "").replace("}", "")
+        rest = re.sub(r"\s{2,}", " ", rest).strip()
+        # Callers are always told she's an AI, whatever the shop wrote. "AI" in the shop's own name doesn't count.
+        if not re.search(r"\bAI\b|\bartificial intelligence\b", rest):
+            rest = re.sub(r"\bMila\b", "Mila, the AI receptionist", rest, count=1) if re.search(r"\bMila\b", rest) \
+                else rest.rstrip() + " This is Mila, the AI receptionist."
+        return re.sub(r"^[\s,.]+", "", rest.replace(mark, name)).strip()
 
     def checks(self) -> list:
         """Sanity checks for the voting node, built from this shop's answers."""
