@@ -40,8 +40,7 @@
         "./skills/web-artifacts-builder",
         "./skills/webapp-testing"
       ]
-    }
-    ,
+    },
     {
       "name": "claude-api",
       "description": "Claude API and SDK documentation skill for building LLM-powered applications",
@@ -67,6 +66,24 @@
       "strict": false,
       "skills": [
         "./skills/discernment-nudge"
+      ]
+    },
+    {
+      "name": "my-skills",
+      "description": "Our own skills for Mila AI: getting the models from Hugging Face and GitHub, voice testing, the brain, local image making, test and Mac-safety routines, and plain-words house rules",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./my-skills/mila-models",
+        "./my-skills/mila-voice-test",
+        "./my-skills/mila-brain",
+        "./my-skills/owner-plain-words",
+        "./my-skills/mila-conversation",
+        "./my-skills/mila-image-local",
+        "./my-skills/quiet-mac-gate",
+        "./my-skills/call-replay-check",
+        "./my-skills/voice-line-check",
+        "./my-skills/safe-mac-work"
       ]
     }
   ]

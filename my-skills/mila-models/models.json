@@ -1,0 +1,25 @@
+{
+  "_note": "Where each Mila tool comes from. Checked on Hugging Face on 2026-11-21. Licences are copied from each model page; re-check before selling.",
+  "huggingface": {
+    "brain": [
+      {"id": "Qwen/Qwen3-8B", "role": "Mila's brain (to be fine-tuned)", "license": "apache-2.0", "size_note": "about 16 GB"}
+    ],
+    "voice_out": [
+      {"id": "Zyphra/ZONOS3-Mini", "role": "voice, test first (built-in Australian accent, voice cloning)", "license": "apache-2.0"},
+      {"id": "mlx-community/ZONOS3-Mini", "role": "same voice, Mac (MLX) version", "license": "apache-2.0"},
+      {"id": "gradium/phonon-31m-en", "role": "voice, fastest (about 20 ms on M1 Pro)", "license": "apache-2.0"},
+      {"id": "hexgrad/Kokoro-82M", "role": "voice, baseline to compare against", "license": "apache-2.0"}
+    ],
+    "ears": [
+      {"id": "moonshine-ai/moonshine-streaming-medium", "role": "live listening on CPU", "license": "mit"},
+      {"id": "moonshine-ai/moonshine-streaming-small", "role": "live listening, lighter", "license": "mit"},
+      {"id": "nvidia/nemotron-3.5-asr-streaming-0.6b", "role": "live listening on GPU (works with Pipecat)", "license": "openmdw-1.1 (open model licence; model page says ready for commercial use; terms at https://openmdw.ai/license/1-1/)"}
+    ]
+  },
+  "github": [
+    {"repo": "pipecat-ai/pipecat", "role": "runs the live phone call (listen, think, speak, barge-in)", "install": "pip install pipecat-ai"},
+    {"repo": "ml-explore/mlx-lm", "role": "runs and fine-tunes Qwen on the Mac", "install": "pip install mlx-lm"},
+    {"repo": "Blaizzy/mlx-audio", "role": "runs voice models on the Mac", "install": "pip install mlx-audio"},
+    {"repo": "langchain-ai/langchain", "role": "connects the brain to each shop's own info (RAG)", "install": "pip install langchain"}
+  ]
+}
