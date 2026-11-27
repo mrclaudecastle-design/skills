@@ -497,6 +497,16 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         text = (f"I don't want to guess a price and get it wrong. I can have {owner} call you back with a proper one. "
                 "Would that help?")
 
+    # 2b. Asked about cost: say the card's prices plainly instead of only "can't say".
+    asked_price = re.search(r"\b(?:how much|price|cost|ballpark|quote|charge|fee|rough idea|some idea|any idea|roughly)\b", caller, re.I)
+    card_prices = a.get("prices") or {}
+    if asked_price and card_prices and not MONEY.search(text) and "price" not in fixes:
+        listed = "; ".join(f"the {k} is {v}" for k, v in card_prices.items())
+        fixes.append("price_said")
+        kept = [x for x in _sentences(text) if not x.endswith("?")][:1]
+        text = " ".join(kept + [f"{listed[0].upper() + listed[1:]}, and the rest depends on the job. "
+                                f"Would you like {owner} to call you with a proper price?"])
+
     # 3. Days and times: only real free spots, only on working days.
     open_days = {d.lower() for d in a.get("open_days", [])}
     # A time with no day takes its day from the call: what the caller just said, then her last reply, then earlier.
@@ -697,6 +707,32 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
             rest = [x for x in _sentences(text) if not ((ACK.match(x) and len(x.split()) <= 4) or NOTED.match(x))]
             text = (f"So that's {name} on {said[-1]}. " if name else f"So that's {said[-1]}. ") + " ".join(rest)
             text = text.strip()
+
+    # 11. One thing at a time: name, then number, then address. A call back never needs an address.
+    call_so_far = heard_so_far + " " + caller
+    wants_call_back = bool(re.search(r"\b(?:call|ring|phone) me\b|\bcall(?:s)? (?:me )?back\b|\bget (?:him|her|them|\w+) to (?:call|ring)\b",
+                                     call_so_far, re.I)) or a.get("bookings", "book") != "book"
+    have_name = bool(caller_name(call_so_far))
+    have_phone = have_number or bool(PHONE.search(spoken_numbers(call_so_far)))
+    have_address = bool(ADDRESS_SAID.search(_mask(spoken_numbers(call_so_far))))
+    parts_q = _sentences(text)
+    for i, q in enumerate(parts_q):
+        if not q.endswith("?"):
+            continue
+        asks = [k for k, rx in (("name", r"\bname\b"), ("number", r"\b(?:phone )?number\b|\bphone\b|\bmobile\b"),
+                                 ("address", r"\baddress\b|\bwhere (?:are you|is the job)\b")) if re.search(rx, q, re.I)]
+        if wants_call_back and "address" in asks:
+            asks.remove("address")
+            if not asks:
+                asks = ["none"]
+        if len(asks) > 1 or asks == ["none"]:
+            missing = [k for k, have in (("name", have_name), ("number", have_phone), ("address", have_address or wants_call_back)) if not have]
+            nxt = missing[0] if missing else None
+            fixes.append("one_ask")
+            parts_q[i] = {"name": "Can I grab your name?", "number": "What's the best number to reach you on?",
+                          "address": "What's the address for the job?", None: ""}[nxt]
+    if "one_ask" in fixes:
+        text = " ".join(x for x in parts_q if x) or "Thanks, I've got that."
 
     # 4. No call back promised without a number.
     # (Skipped when she is already asking something: one question at a time.)

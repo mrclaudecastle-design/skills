@@ -618,6 +618,22 @@ class Guard(unittest.TestCase):
         g = guard("Would you like to book a time for Dave to call?", have_number=True)
         self.assertEqual(g.text, "Would you like to have Dave call you back?")
 
+    def test_one_ask_and_prices(self):
+        """Wobbles from live round 6: two asks at once, an address for a call back, no price on a price question."""
+        card = ShopCard.load(Path(__file__).resolve().parent.parent / "shop" / "examples" / "birch-and-co.json")
+        diary = [("Tuesday", "9:30am"), ("Thursday", "2:00pm")]
+        g = guard("Can I get your address and phone number so I can book you in?", caller="Nah yeah, Thursday works.", card=card, diary=diary,
+                  heard_so_far="G'day, my hot water's carked it. It's Shane.")
+        self.assertEqual(g.text, "What's the best number to reach you on?")
+        g = guard("Could you give me your name and number, and what address you're at?", caller="Yeah alright, get him to call me.",
+                  card=card, diary=diary)
+        self.assertEqual(g.text, "Can I grab your name?")
+        g = guard("I'm sorry, but I can't give you a price over the phone. Dave will need to assess the job.",
+                  caller="Come on, you must have some idea.", heard_so_far="Just give me a ballpark, fifty bucks?", card=card, have_number=True)
+        self.assertIn("$90", g.text)
+        g = guard("I'm sorry, but I can't give you a price over the phone.", caller="How much roughly?", card=card, have_number=True)
+        self.assertIn("$90", g.text)
+
     def test_spoken_numbers(self):
         from guard import spoken_numbers
         self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")
