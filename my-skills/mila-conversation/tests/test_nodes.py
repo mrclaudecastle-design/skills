@@ -329,7 +329,7 @@ class Guard(unittest.TestCase):
         out = self.g("Got it, 0433 987 654. Dave will call you back within fifteen minutes. Is there anything else I can assist with?", "0433 987 654.")
         self.assertEqual(out.fixes, ["deadline"])
         self.assertIn("as soon as possible", out.text)
-        out = self.g("Thanks Linda. I'll book you for Friday. Dave will see you today.", have_number=True)
+        out = self.g("Thanks Linda. I'll book you for Tuesday. Dave will see you today.", have_number=True)
         self.assertEqual(out.fixes, ["promise"])
         self.assertNotIn("today", out.text)
         out = self.g("No, we don't do roofing. We specialise in plumbing. Let me know if you need help with anything else!")

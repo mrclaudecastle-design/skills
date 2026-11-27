@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from guard import PHONE, guard, is_urgent     # noqa: E402
+from guard import PHONE, guard, is_urgent, spoken_numbers     # noqa: E402
 from lingo import mirror, understand          # noqa: E402
 from plausibility import Vote, decide         # noqa: E402
 from repair import handle_key, next_step      # noqa: E402
@@ -34,11 +34,12 @@ class Out:
 
 
 class Call:
-    def __init__(self, country: str = "au", checks=(), card=None):
+    def __init__(self, country: str = "au", checks=(), card=None, today: str | None = None):
         # Pass a ShopCard and the country and sanity checks come from the shop's own answers.
         self.country = card.country if card else country
         self.checks = list(checks) + (card.checks() if card else [])
         self.card = card
+        self.today = today          # today's weekday name, so "tomorrow at 2pm" can be checked against the diary
         self.misses = 0             # misunderstandings in a row on the current detail
         self.caller_casual = False  # has the caller used everyday local talk yet?
         self.pending = None         # a reading waiting for a yes or no
@@ -93,12 +94,14 @@ class Call:
         self.misses, self.pending = 0, None
         return Out("act", None, choice, 1.0)
 
-    def speak(self, brain_reply: str, diary=None) -> Out:
+    def speak(self, brain_reply: str, diary=None, today: str | None = None) -> Out:
         """Run the brain's reply through the safety net, then into spoken form."""
-        g = guard(brain_reply, self.last_heard, self.card, diary, self.have_number, self.urgent, self.all_heard, self.last_spoken)
+        g = guard(brain_reply, self.last_heard, self.card, diary, self.have_number, self.urgent, self.all_heard, self.last_spoken,
+                  today or self.today)
         self.all_heard += " " + self.last_heard
         self.last_spoken = g.text
-        self.have_number = self.have_number or bool(PHONE.search(self.last_heard))
+        # A number said in words ("oh four one two...") counts as given, the same as one in digits.
+        self.have_number = self.have_number or bool(PHONE.search(spoken_numbers(self.last_heard)))
         self.last_heard = ""        # this line has been answered; don't read its number back twice
         return Out("say", say_it(g.text), signals=set(g.fixes))
 

@@ -4,7 +4,7 @@
 A short ladder, so nobody gets stuck repeating themselves:
   step 1  say her best guess back and ask if that's right
   step 2  second approach: "press 1 if you meant X, 2 if you meant Y"
-  step 3  stop trying, take a message and promise a call back
+  step 3  stop trying, take a message and offer a call back (no "straight back": she can't promise when)
 
     from repair import next_step, handle_key
     step = next_step(misses=2, guesses=["Thursday at 2", "Tuesday at 2"])
@@ -49,7 +49,7 @@ def handle_key(digit: str, keys: dict):
 
 def _take_message() -> Step:
     return Step("take_message", "I'm sorry, I don't want to keep getting this wrong. "
-                "I'll take a quick message and have them call you straight back. What's the best number for you?")
+                "I'll take a quick message and have them call you back as soon as possible. What's the best number for you?")
 
 
 if __name__ == "__main__":
