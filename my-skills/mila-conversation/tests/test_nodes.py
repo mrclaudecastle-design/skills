@@ -665,6 +665,19 @@ class Guard(unittest.TestCase):
         g = guard("I'm sorry, I can't give you a price.", caller="Come on, you must have some idea.", card=card, last_reply=line, have_number=True)
         self.assertNotEqual(g.text, line)
 
+    def test_live_08_slips_are_caught(self):
+        """Real replies from live round 8 (v23, 27 Nov 2026)."""
+        card = ShopCard.load(Path(__file__).resolve().parent.parent / "shop" / "examples" / "birch-and-co.json")
+        diary = [("Tuesday", "9:30am"), ("Thursday", "2:00pm"), ("Friday", "11:00am")]
+        g = guard("What day suits you?", caller="Yeah nah, Tuesday's no good, I'm flat out.", card=card, diary=diary)
+        self.assertNotIn("Tuesday", g.text)
+        self.assertIn("promise", guard("I'll get Dave right away.", caller="my hot water's carked it", card=card, diary=diary).fixes)
+        self.assertIn("booking", guard("I have you booked for Friday at 11:00am. Does that work for you?", caller="Yes, Friday is fine.",
+                                       card=card, diary=diary).fixes)
+        g = guard("Would you like to book an appointment or is there something else I can assist with?", caller="Can you recommend an electrician?",
+                  card=card, diary=diary)
+        self.assertEqual(g.text, "Would you like to book an appointment?")
+
     def test_spoken_numbers(self):
         from guard import spoken_numbers
         self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")

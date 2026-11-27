@@ -113,7 +113,7 @@ BY_WHEN = re.compile(r"\b(?:by|before) (?:the )?(?:end of (?:the )?(?:day|week)|
 CALLBACK = re.compile(r"\b(?:call|ring|phone|get back to) you\b|\bcall(?:s)? you back\b|\bcall back\b", re.I)
 SOON = re.compile(r"\b(?:later )?(?:today|tonight|tomorrow(?: (?:morning|arvo|afternoon))?|this (?:arvo|afternoon|morning|evening)|"
                   r"right now|right away|straight away|immediately)\b|\bnow(?=[.!?,]|$)", re.I)
-DOING = re.compile(r"\b(?:will|'ll|can|going to|gonna)\b[^.!?]*\b(?:call|ring|phone|come|be there|be with you|be out|see you|fit you in|pass|let \w+ know|"
+DOING = re.compile(r"\b(?:will|'ll|can|going to|gonna)\b[^.!?]*\b(?:call|ring|phone|come|be there|be with you|be out|see you|fit you in|pass|let \w+ know|get \w+|"
                    r"head over|get back|get out|pop (?:over|round)|sort|hear (?:from|back)|be in touch|get in touch|contact|reach out|arrive|turn up|show up|"
                    r"drop (?:by|in|round|over)|swing by|be (?:round|over|done|fixed|finished|ready)|have (?:it|that) (?:fixed|done|sorted|finished)|fix|"
                    r"squeeze you in)\b|\bexpect (?:a call|him|her|them|\w+)\b", re.I)
@@ -131,7 +131,7 @@ URGENT = re.compile(r"\b(?:urgent|emergency|flood(?:ing|ed)?|burst|pouring|gushi
 ACK = re.compile(r"^(?:thanks|thank you|got it|great|sure(?: thing)?|okay|ok|no problem|perfect|lovely|i've noted|i have noted|noted)\b", re.I)
 ADDRESS = re.compile(r"\b(?:(?:unit|flat|apartment) \d+[a-z]?,? ?)?\d{1,4}[a-z]?(?:/\d{1,4})? (?:[A-Z][\w']+ ){1,3}"
                      r"(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Place|Pl|Crescent|Cres|Highway|Hwy|Parade|Pde|Terrace|Tce|Lane|Ln|Boulevard|Blvd|Close|Way)\b")
-ANYTHING_ELSE = re.compile(r"^is there anything else (?:i can (?:assist|help)(?: you)?(?: with)?|you need|you'd like to add|you want to add)[^?]*\?$", re.I)
+ANYTHING_ELSE = re.compile(r"^is there (?:anything|something) else (?:i can (?:assist|help)(?: you)?(?: with)?|you need|you'd like to add|you want to add)[^?]*\?$", re.I)
 FLUFF = re.compile(r"^(?:that(?:'s| is| slot's| slot is) (?:a |still )?free(?: spot)?(?: in the diary)?[.!]|that's available[.!])$", re.I)
 NOTED = re.compile(r"^i(?:'ve| have) (?:noted|got|taken|recorded)\b[^?]*$", re.I)
 VAGUE_SOON = re.compile(r"\b(?:shortly|in no time|(?<!as )soon(?! as))\b", re.I)
@@ -152,7 +152,7 @@ REFUSE_AFTER = re.compile(DAY + r"(?:'s|\s+is)?\s+(?:no good|not good|out|no go|
 BOOKED = re.compile(r"\b(?:i've|i have|we've|we have)\s+(?:booked|got you (?:down|in|booked)|locked (?:you|that|it) in|pencilled)|"
                     r"\byou're (?:all )?(?:booked|set|locked in)\b|\bbooked (?:you|that|it) in\b|\bthat's (?:booked|locked in)\b|"
                     r"\bi'll (?:book|lock|pop) (?:you|that|it) in\b|\b(?:your )?booking(?:'s| is) (?:confirmed|locked in|all set)\b|"
-                    r"\b(?:locked|booked) (?:it|that|you) in\b|\ball booked\b|\bconfirmed your booking\b|\bgot you (?:booked|down|in)\b", re.I)
+                    r"\b(?:locked|booked) (?:it|that|you) in\b|\ball booked\b|\bconfirmed your booking\b|\b(?:got|have) you (?:booked|down|in)\b|\byou're (?:down|in) for\b", re.I)
 YES = re.compile(r"^\W*(?:yes|yeah|yep|yup|correct|that's right|that's it|spot on|perfect|sounds good|sure|ok|okay|all good|"
                  r"too easy|lovely|right|bang on|that's correct|that's all correct|all correct|all right|thanks|thank you|cheers|ta|great|"
                  r"good)\b(?!\W*(?:but|no|not|wait|actually|hang on))", re.I)   # the ears often lose the "yes" before "thanks"
@@ -1057,7 +1057,8 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     if diary and not offered and ASK_WHEN.search(text):
         fixes.append("offer_spot")
         said_days = [d for d, _ in diary if d.lower() in caller.lower()]
-        picks = [s for s in diary if s[0] in said_days][:1] or list(diary[:2])
+        open_spots = [s for s in diary if s[0].lower() not in refused] or list(diary)    # never offer a day they said no to
+        picks = [s for s in open_spots if s[0] in said_days and s[0].lower() not in refused][:1] or list(open_spots[:2])
         offer = (f"I have {picks[0][0]} at {picks[0][1]}. Would that suit?" if len(picks) == 1 else
                  f"The next free spots are {picks[0][0]} at {picks[0][1]} or {picks[1][0]} at {picks[1][1]}. Would either suit?")
         kept = [s for s in _sentences(text) if not s.endswith("?")][:1]
@@ -1110,6 +1111,12 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     if MATE.search(text) and "mate" not in everything_heard:
         fixes.append("slang")
         text = MATE.sub("", text)
+
+    # "Would you like to book, or is there something else I can help with?": keep only the real question.
+    tail_off = re.sub(r",? or (?:is there )?(?:anything|something) else (?:i can|we can|you need|you'd like)[^?]*\?", "?", text, flags=re.I)
+    if tail_off != text:
+        fixes.append("sign_off")
+        text = tail_off
 
     # 7b. No chatbot sign-offs, and not too long for a phone call.
     parts = _sentences(text)
