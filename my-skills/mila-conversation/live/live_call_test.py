@@ -9,6 +9,9 @@ from the two result files it writes into --out (a new folder).
     python live_call_test.py --model /Volumes/02-WORK/MilaModels/Qwen3-8B-mlx-4bit \\
         --out /Volumes/02-WORK/MilaModels/runs/live-01 [--adapter-path ...]
 """
+import os
+os.environ.setdefault("ORT_DISABLE_TELEMETRY", "1")   # no Microsoft telemetry if anything loads onnxruntime
+os.environ.setdefault("HF_HUB_OFFLINE", "1")          # never reach the internet during a test
 import argparse
 import copy
 import json

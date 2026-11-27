@@ -634,6 +634,37 @@ class Guard(unittest.TestCase):
         g = guard("I'm sorry, but I can't give you a price over the phone.", caller="How much roughly?", card=card, have_number=True)
         self.assertIn("$90", g.text)
 
+    def test_live_07_slips_are_caught(self):
+        """Real replies from live round 7 (v22, 27 Nov 2026)."""
+        card = ShopCard.load(Path(__file__).resolve().parent.parent / "shop" / "examples" / "birch-and-co.json")
+        diary = [("Tuesday", "9:30am"), ("Thursday", "2:00pm"), ("Friday", "11:00am")]
+        # Call 10: the shop works Wednesdays.
+        g = guard("We don't do Wednesday. Would you like to book one of our free spots instead?", caller="Can I book Wednesday at 10am?",
+                  card=card, diary=diary)
+        self.assertNotIn("don't do Wednesday", g.text)
+        self.assertIn("Wednesday at 10am isn't free", g.text)
+        self.assertNotIn("closed_day", guard("We don't do Sundays, sorry.", caller="Sunday?", card=card, diary=diary).fixes)
+        # Call 2: a visit is never "as soon as possible" when the diary has spots.
+        g = guard("Sure, I can have someone come out today.", caller="Could someone come out this week?", card=card, diary=diary)
+        self.assertNotIn("as soon as possible", g.text)
+        self.assertIn("Tuesday at 9:30am", g.text)
+        # Call 1: booked before a yes.
+        self.assertIn("booking", guard("Got you booked for Thursday 2:00pm.", caller="Nah yeah, Thursday works.", card=card, diary=diary).fixes)
+        # Call 7: "as soon as" once.
+        g = guard("I'll pass your message to Dave right away. He'll ring you as soon as he can.", caller="get Dave to ring me", card=card,
+                  have_number=True)
+        self.assertEqual(g.text.count("as soon as"), 1)
+        # Call 9: urgent asks address and number before name, then says the card's promise.
+        g = guard("That's urgent. Can I grab your name?", caller="There's water pouring through my ceiling!", card=card, diary=diary)
+        self.assertIn("address", g.text)
+        g = guard("So that's 0411 000 999. Your name?", caller="0411 000 999.", heard_so_far="Water pouring through my ceiling! 22 Old Coach Road.",
+                  card=card, diary=diary)
+        self.assertIn("within fifteen minutes", g.text)
+        # Call 11: the price line is not said twice word for word.
+        line = "The call-out fee is $90, and the rest depends on the job. Would you like Dave to call you with a proper price?"
+        g = guard("I'm sorry, I can't give you a price.", caller="Come on, you must have some idea.", card=card, last_reply=line, have_number=True)
+        self.assertNotEqual(g.text, line)
+
     def test_spoken_numbers(self):
         from guard import spoken_numbers
         self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")

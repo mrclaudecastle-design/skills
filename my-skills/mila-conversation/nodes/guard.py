@@ -152,7 +152,7 @@ REFUSE_AFTER = re.compile(DAY + r"(?:'s|\s+is)?\s+(?:no good|not good|out|no go|
 BOOKED = re.compile(r"\b(?:i've|i have|we've|we have)\s+(?:booked|got you (?:down|in|booked)|locked (?:you|that|it) in|pencilled)|"
                     r"\byou're (?:all )?(?:booked|set|locked in)\b|\bbooked (?:you|that|it) in\b|\bthat's (?:booked|locked in)\b|"
                     r"\bi'll (?:book|lock|pop) (?:you|that|it) in\b|\b(?:your )?booking(?:'s| is) (?:confirmed|locked in|all set)\b|"
-                    r"\b(?:locked|booked) (?:it|that|you) in\b|\ball booked\b|\bconfirmed your booking\b", re.I)
+                    r"\b(?:locked|booked) (?:it|that|you) in\b|\ball booked\b|\bconfirmed your booking\b|\bgot you (?:booked|down|in)\b", re.I)
 YES = re.compile(r"^\W*(?:yes|yeah|yep|yup|correct|that's right|that's it|spot on|perfect|sounds good|sure|ok|okay|all good|"
                  r"too easy|lovely|right|bang on|that's correct|that's all correct|all correct|all right|thanks|thank you|cheers|ta|great|"
                  r"good)\b(?!\W*(?:but|no|not|wait|actually|hang on))", re.I)   # the ears often lose the "yes" before "thanks"
@@ -718,7 +718,7 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     country = str(a.get("country") or "au")
     card_blob = _card_says(a)
     if urgent is None:
-        urgent = is_urgent(caller)
+        urgent = is_urgent(heard_so_far + " " + caller)
 
     text = text.replace("\u2019", "'").replace("\u2018", "'")
     caller = spoken_numbers(caller.replace("\u2019", "'").replace("\u2018", "'"))
@@ -872,10 +872,27 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         and not re.search(r"depends on the job", text, re.I)
     if asked_price and card_prices and flat_no and not MONEY.search(spoken_numbers(text)) and "price" not in fixes:
         listed = "; ".join(f"the {k} is {v}" for k, v in card_prices.items())
+        if last_reply and "depends on the job" in last_reply:      # said it already: don't say it word for word again
+            fixes.append("price_said")
+            text = f"Honestly, {owner} needs to see the job before he can give a fair price. Want him to give you a call?"
+            card_prices = {}
+    if asked_price and card_prices and flat_no and not MONEY.search(spoken_numbers(text)) and "price" not in fixes:
+        listed = "; ".join(f"the {k} is {v}" for k, v in card_prices.items())
         fixes.append("price_said")
         kept = [x for x in _sentences(text) if not x.endswith("?")][:1]
         text = " ".join(kept + [f"{listed[0].upper() + listed[1:]}, and the rest depends on the job. "
                                 f"Would you like {owner} to call you with a proper price?"])
+
+    # 3a. Never say the shop doesn't work a day it does.
+    days_open = {str(d).lower() for d in a.get("open_days", [])}
+    closed_claim = re.compile(r"\b(?:don't|do not|aren't|are not|can't|cannot|never)\s+(?:do|open|work|come out|available|go out)?\s*"
+                              r"(?:on\s+)?(?:a\s+)?" + DAY + r"s?\b", re.I)
+    wrong = [x for x in _sentences(text) for m in closed_claim.finditer(x) if m.group(1).lower() in days_open]
+    if wrong:
+        fixes.append("closed_day")
+        asked = SLOT.search(caller)
+        why = f"Sorry, {asked.group(1).capitalize()} at {asked.group(2)} isn't free." if asked else "Sorry, that day's full."
+        text = " ".join(why if x in wrong else x for x in dict.fromkeys(_sentences(text)))
 
     # 3. Days and times: only real free spots, only on working days.
     open_days = {str(d).lower() for d in a.get("open_days", [])}
@@ -1149,6 +1166,19 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
             text = (f"So that's {name} on {said[-1]}. " if name else f"So that's {said[-1]}. ") + " ".join(rest)
             text = text.strip()
 
+    # 5d. A visit is never "as soon as possible": offer a real spot instead. And say "as soon as" once.
+    visit = re.compile(r"\b(?:come|come out|be there|be out|pop (?:over|round)|head over|get out|send someone|arrange someone)\b", re.I)
+    if not urgent and diary and "promise" in fixes:
+        sent = _sentences(text)
+        if any("as soon as possible" in x and visit.search(x) for x in sent):
+            d, t = next(((d, t) for d, t in diary if d.lower() not in refused), diary[0])
+            kept = [x for x in sent if not ("as soon as possible" in x and visit.search(x)) and not x.endswith("?")]
+            text = " ".join(kept + [f"The next free spot is {d} at {t}. Would that suit?"])
+    sent = _sentences(text)
+    if sum("as soon as" in x for x in sent) > 1:
+        last = max(i for i, x in enumerate(sent) if "as soon as" in x)
+        text = " ".join(re.sub(r",? as soon as possible", "", x) if i < last else x for i, x in enumerate(sent))
+
     # 12. One thing at a time: name, then number, then address. A call back never needs an address.
     call_so_far = heard_so_far + " " + caller
     wants_call_back = bool(re.search(r"\b(?:call|ring|phone) me\b|\bcall(?:s)? (?:me )?back\b|\bget (?:him|her|them|\w+) to (?:call|ring)\b",
@@ -1166,14 +1196,25 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
             asks.remove("address")
             if not asks:
                 asks = ["none"]
-        if len(asks) > 1 or asks == ["none"]:
-            missing = [k for k, have in (("name", have_name), ("number", have_phone), ("address", have_address or wants_call_back)) if not have]
+        urgent_first = urgent and asks == ["name"] and not (have_address and have_phone)
+        if len(asks) > 1 or asks == ["none"] or urgent_first:
+            order = (("address", have_address), ("number", have_phone), ("name", True)) if urgent else \
+                    (("name", have_name), ("number", have_phone), ("address", have_address or wants_call_back))
+            missing = [k for k, have in order if not have]
             nxt = missing[0] if missing else None
             fixes.append("one_ask")
             parts_q[i] = {"name": "Can I grab your name?", "number": "What's the best number to reach you on?",
                           "address": "What's the address for the job?", None: ""}[nxt]
     if "one_ask" in fixes:
         text = " ".join(x for x in parts_q if x) or "Thanks, I've got that."
+
+    # 13. Urgent: once address and number are in, say what the card promises ("Dave will ring within fifteen minutes").
+    promise_m = DEADLINE.search(a.get("emergencies", "") or "")
+    if urgent and promise_m and have_address and have_phone and not DEADLINE.search(text) \
+            and not DEADLINE.search(last_reply or ""):
+        fixes.append("urgent_promise")
+        kept = [x for x in _sentences(text) if not x.endswith("?")]
+        text = " ".join(kept + [f"{owner} will ring you {promise_m.group(0)}."])
 
     # 4. No call back promised without a number.
     # (Skipped when she is already asking something: one question at a time.)
