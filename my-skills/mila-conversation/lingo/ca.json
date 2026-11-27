@@ -1,0 +1,43 @@
+{
+  "_note": "Everyday Canadian phrases Mila should understand. She goes along with them and never starts them.",
+  "phrases": {
+    "for sure": {"means": "yes", "signal": "yes"},
+    "you bet": {"means": "yes", "signal": "yes"},
+    "give'r": {"means": "go ahead", "signal": "yes"},
+    "no doubt": {"means": "agreed", "signal": "yes"},
+    "eh": {"means": "", "signal": "casual"},
+    "bud": {"means": "", "signal": "casual"},
+    "buddy": {"means": "", "signal": "casual"},
+    "thanks a bunch": {"means": "thanks", "signal": "thanks"},
+    "take care": {"means": "goodbye", "signal": "bye"},
+    "washroom": {"means": "toilet"},
+    "hydro": {"means": "electricity"},
+    "hydro bill": {"means": "electricity bill"},
+    "hydro's out": {"means": "power is out", "signal": "broken"},
+    "furnace": {"means": "home heater"},
+    "eavestrough": {"means": "roof gutter"},
+    "eavestroughs": {"means": "roof gutters"},
+    "garburator": {"means": "garbage disposal unit"},
+    "parkade": {"means": "parking garage"},
+    "chesterfield": {"means": "couch"},
+    "bachelor apartment": {"means": "studio apartment"},
+    "loonie": {"means": "one dollar"},
+    "toonie": {"means": "two dollars"},
+    "klick": {"means": "kilometre"},
+    "klicks": {"means": "kilometres"},
+    "runners": {"means": "running shoes"},
+    "toque": {"means": "winter hat"},
+    "on the fritz": {"means": "not working properly", "signal": "broken"},
+    "kaput": {"means": "broken", "signal": "broken"},
+    "slammed": {"means": "very busy", "signal": "busy"},
+    "swamped": {"means": "very busy", "signal": "busy"},
+    "first thing": {"means": "early in the morning", "signal": "time"},
+    "after supper": {"means": "in the evening", "signal": "time"}
+  },
+  "mirrors": {
+    "_note": "Light phrases Mila may use back, only when the caller has been casual first.",
+    "ok": ["For sure.", "No problem at all.", "You bet."],
+    "thanks": ["No problem at all.", "Happy to help."],
+    "bye": ["Thanks for calling, take care.", "Have a good one."]
+  }
+}

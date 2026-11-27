@@ -1,0 +1,19 @@
+{
+  "_note": "The start-up questions a new shop answers once. Plain words only. 'need' marks the ones Mila can't work without. Everything else has a sensible default, so a shop can be live in a few minutes.",
+  "questions": [
+    {"id": "shop_name", "need": true, "ask": "What's your business called?", "example": "Birch and Co Plumbing"},
+    {"id": "trade", "need": true, "ask": "What do you do, in a few words?", "example": "plumber"},
+    {"id": "owner_name", "need": true, "ask": "Who should Mila say will call people back?", "example": "Dave"},
+    {"id": "country", "need": true, "ask": "Which country are you in?", "choices": ["au", "ca"], "example": "au"},
+    {"id": "area", "ask": "Which suburbs or areas do you cover?", "example": "Northern Beaches and the North Shore"},
+    {"id": "open_days", "ask": "Which days do you work?", "example": ["monday", "tuesday", "wednesday", "thursday", "friday"], "default": ["monday", "tuesday", "wednesday", "thursday", "friday"]},
+    {"id": "open_hours", "ask": "What hours do you take jobs?", "example": "7am to 4pm", "default": "business hours"},
+    {"id": "services", "ask": "What are the main jobs you do?", "example": ["blocked drains", "hot water systems", "leaking taps"]},
+    {"id": "not_offered", "ask": "Anything people ask for that you don't do?", "example": ["roofing", "gas fitting"]},
+    {"id": "prices", "ask": "Any prices Mila is allowed to say? Leave empty and she never quotes.", "example": {"call-out fee": "$90"}},
+    {"id": "bookings", "ask": "Should Mila book jobs into your diary, or just take a message?", "choices": ["book", "message"], "default": "message"},
+    {"id": "emergencies", "ask": "What counts as urgent, and what should Mila do?", "example": "Burst pipes or no water: text me straight away.", "default": "Take the details and say the owner will call back as soon as possible."},
+    {"id": "greeting", "ask": "How should Mila answer the phone?", "example": "Birch and Co Plumbing, this is Mila.", "default": "{shop_name}, this is Mila. How can I help?"},
+    {"id": "extra", "ask": "Anything else Mila should know or never say?", "example": "We don't do Sundays, ever."}
+  ]
+}

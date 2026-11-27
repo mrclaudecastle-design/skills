@@ -1,0 +1,15 @@
+{
+  "shop_name": "Birch and Co Plumbing",
+  "trade": "plumber",
+  "owner_name": "Dave",
+  "country": "au",
+  "area": "Northern Beaches and the North Shore",
+  "open_days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+  "open_hours": "7am to 4pm",
+  "services": ["blocked drains", "hot water systems", "leaking taps", "toilets"],
+  "not_offered": ["roofing", "gas fitting"],
+  "prices": {"call-out fee": "$90"},
+  "bookings": "book",
+  "emergencies": "Burst pipes or no water: take the address and number and say Dave will ring within fifteen minutes.",
+  "extra": "We don't do Sundays, ever."
+}
