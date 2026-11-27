@@ -328,6 +328,52 @@ class CallFlowAttacks(unittest.TestCase):
         self.assertEqual(guard(line, "", CARD, DIARY).fixes, [])
 
 
+class OtherPartsAttacks(unittest.TestCase):
+    def test_voting_survives_bad_numbers(self):
+        from plausibility import Vote, decide, phone_has_enough_digits, within_opening_days
+        for bad in (None, "x", float("nan")):
+            self.assertEqual(decide([Vote("a", bad), Vote("b", 0.5)]).value, "b")
+        self.assertEqual(decide([Vote("a", float("inf")), Vote("b", 0.5)]).value, "a")
+        self.assertLessEqual(decide([Vote("a", 5)]).confidence, 1.0)
+        for check in (lambda v: 1 / 0, lambda v: None, lambda v: float("nan")):      # a broken check has no say
+            self.assertEqual(decide([Vote("a", 0.9), Vote("a", 0.9)], [check]).action, "act")
+        self.assertEqual(decide([Vote(None, 0.9), Vote("none", 0.2)]).confidence, 0.2)
+        self.assertEqual([phone_has_enough_digits(p) for p in ("+61 412 345 678", "0412 345 678", "0412 345 678 9", "041234567")], [1.0, 1.0, 0.2, 0.2])
+        closed_sunday = within_opening_days({"Monday"})
+        self.assertEqual([closed_sunday(v) for v in ("Sun 2pm", "sunday", "monday", "a sundae")], [0.1, 0.1, 1.0, 1.0])
+
+    def test_lingo_survives_any_country_and_keeps_names(self):
+        from lingo import understand
+        for country in ("nz", " AU ", None, "", 5, "../shop/questionnaire", "au.json"):
+            self.assertIsInstance(understand("yeah nah cheers", country)["plain"], str)
+        self.assertEqual(understand("yeah nah", "../shop/questionnaire")["plain"], "no")     # odd input falls back to au
+        self.assertEqual(understand("yeah nah", "nz")["plain"], "yeah nah")                  # no list yet: left as said
+        self.assertEqual(understand(None)["plain"], "")
+        self.assertIn("John Keen", understand("It's John Keen, ta.")["plain"])
+        self.assertIn("Ta-da", understand("Ta-da, it works")["plain"])
+
+    def test_call_survives_bad_ears_and_keys(self):
+        call = Call(card=CARD)
+        for heard in (None, [], [(None, 0.9)], [("thursday", None)], [("", 0.9)], [("thursday",)], ["x"]):
+            self.assertTrue(call.hear(heard).action)
+        for key in (None, 1, "abc", "9"):
+            out = call.press(key)
+            self.assertNotIn(". .", out.say or "")
+        self.assertTrue(call.speak(None).say)
+        self.assertTrue(Call(country="zz").hear([("yes", 0.9)]).action)
+        self.assertTrue(Call(card=ShopCard({**BASE, "country": "nz"})).hear([("yes", 0.9)]).action)
+
+    def test_small_parts_survive_odd_settings(self):
+        from fillers import Fillers
+        from stopwatch import Stopwatch
+        self.assertTrue(Fillers().holding(None, None))
+        sw = Stopwatch(budget={"x": None})
+        with sw.step("x"):
+            pass
+        self.assertEqual(sw.slow_steps(), [])
+        self.assertIn("total", sw.report())
+
+
 class SayItAttacks(unittest.TestCase):
     def test_times(self):
         self.assertEqual(say_it("at 2.30pm"), "at half past two in the afternoon")

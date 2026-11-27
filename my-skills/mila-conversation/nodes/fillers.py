@@ -35,7 +35,7 @@ class Fillers:
         return self._pick("listening", LISTENING)
 
     def holding(self, what: str = "any", expected_wait_ms: float = HOLD_AFTER_MS) -> str | None:
-        if expected_wait_ms < HOLD_AFTER_MS:
+        if expected_wait_ms is not None and expected_wait_ms < HOLD_AFTER_MS:
             return None
         return self._pick("holding", HOLDING.get(what, HOLDING["any"]))
 
