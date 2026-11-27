@@ -83,7 +83,12 @@
         "./my-skills/quiet-mac-gate",
         "./my-skills/call-replay-check",
         "./my-skills/voice-line-check",
-        "./my-skills/safe-mac-work"
+        "./my-skills/safe-mac-work",
+        "./my-skills/p4k-labs-tune-loop",
+        "./my-skills/model-qwen3-5",
+        "./my-skills/model-qwen3-8b",
+        "./my-skills/heretic-model-edit",
+        "./my-skills/local-rag"
       ]
     }
   ]
