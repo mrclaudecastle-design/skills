@@ -19,21 +19,41 @@ from pathlib import Path
 LINGO_DIR = Path(__file__).resolve().parent.parent / "lingo"
 
 
-@lru_cache
+def _code(country) -> str:
+    """A country code is two or three letters and nothing else, so it can never point at another file."""
+    code = str(country or "au").strip().lower()
+    return code if re.fullmatch(r"[a-z]{2,3}", code) else "au"
+
+
 def load(country: str) -> dict:
-    data = json.loads((LINGO_DIR / f"{country.lower()}.json").read_text())
+    return _load(_code(country))
+
+
+@lru_cache
+def _load(country: str) -> dict:
+    path = LINGO_DIR / f"{country}.json"
+    try:
+        data = json.loads(path.read_text())
+        data["phrases"]
+    except (OSError, ValueError, KeyError, TypeError):
+        # No word list for this country yet: she understands plain English and mirrors nothing.
+        return {"phrases": {}, "pattern": re.compile(r"(?!x)x"), "mirrors": {}}
     # Longest phrases first so "yeah nah yeah" wins over "yeah nah".
     phrases = sorted(data["phrases"].items(), key=lambda kv: -len(kv[0]))
-    pattern = re.compile(r"(?<![\w'])(" + "|".join(re.escape(p) for p, _ in phrases) + r")(?![\w'])", re.I)
+    pattern = re.compile(r"(?<![\w'-])(" + "|".join(re.escape(p) for p, _ in phrases) + r")(?![\w'-])", re.I)
     return {"phrases": dict(phrases), "pattern": pattern, "mirrors": data.get("mirrors", {})}
 
 
 def understand(text: str, country: str = "au") -> dict:
     """Return the caller's words in plain English, plus what they signalled."""
     lang = load(country)
+    text = str(text or "")
     signals, matched = set(), []
 
     def swap(m):
+        before = m.string[:m.start()].rstrip()
+        if m.group(1)[:1].isupper() and before and before[-1] not in ".!?" and before.split()[-1][:1].isupper():
+            return m.group(1)                      # a surname, not slang: "John Keen"
         entry = lang["phrases"][m.group(1).lower()]
         matched.append(m.group(1).lower())
         if entry.get("signal"):
