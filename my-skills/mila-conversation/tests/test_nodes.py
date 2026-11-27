@@ -347,7 +347,8 @@ class Guard(unittest.TestCase):
                      "My name is Linda Park and the number is 0498 111 222.")
         self.assertEqual(out.text, "So that's Linda Park on 0498 111 222. Dave will call you back to confirm the details.")
         out = self.g("Sure, Wednesday at 10am. Is that correct?", "Can I book Wednesday at 10am?")
-        self.assertEqual(out.text, "Sorry, Wednesday at 10am isn't free. The next free spot is Tuesday at 9:30am. Would that suit?")
+        self.assertEqual(out.text, "Sorry, Wednesday at 10am isn't free. The free spots I have are Tuesday at 9:30am or Thursday at 2:00pm. "
+                                   "Would one of those suit?")   # all the free spots, not a "next" one before the day asked (rehearsal 6)
         self.assertEqual(self.g("Thanks, have a great day!", "No worries. Bye.", have_number=True).fixes, [])   # a real goodbye stays
 
     def test_launch_thread_replay_faults(self):
@@ -694,7 +695,87 @@ class Guard(unittest.TestCase):
         self.assertTrue(g.text.endswith("Would you like Dave to call you with a proper price?"))
         g = guard("Thanks for calling. If you need help with blocked drains, leaks, or hot water systems, we're your go-to team.",
                   caller="No worries. Bye.", card=card)
-        self.assertEqual(g.text, "No worries. Thanks for calling Birch and Co Plumbing.")
+        self.assertEqual(g.text, "No problem at all. Thanks for calling Birch and Co Plumbing, bye.")
+
+    def test_rehearsal_10_slips_are_caught(self):
+        """Real replies from the round 10 cloud rehearsals (v25 and v26 on a GGUF copy of the brain, 27 Nov 2026)."""
+        card = ShopCard.load(Path(__file__).resolve().parent.parent / "shop" / "examples" / "birch-and-co.json")
+        diary = [("Tuesday", "9:30am"), ("Thursday", "2:00pm"), ("Friday", "11:00am")]
+        # She can't put a call through: the offer becomes a call back, a statement just goes.
+        g = guard("We charge a call-out fee of $90, and the cost of the job itself depends on the situation. Would you like me to get Dave "
+                  "on the phone to give you a better idea?", caller="How much do you reckon it'd be to fix a leaking tap?", card=card, diary=diary)
+        self.assertTrue(g.text.endswith("Would you like Dave to call you back?") and "on the phone" not in g.text)
+        g = guard("No, we don't do roofing. We specialise in blocked drains, hot water systems, leaking taps and toilets. Let me get Dave on the line for you.",
+                  caller="Do you guys do roofing as well?", card=card, diary=diary)
+        self.assertNotIn("on the line", g.text)
+        # A call back with name and number in still needs what it's about.
+        g = guard("Sure, Bec. Can I get your address and what the call is about?", caller="Can you get Dave to call me back? It's Bec, 0412 345 678.",
+                  card=card, diary=diary)
+        self.assertEqual(g.text, "So that's Bec on 0412 345 678. And what's it about?")
+        g = guard("Got it. I'll pass on your message to Dave right away. Thanks, Bec.", caller="Just tell him it's about the quote.",
+                  heard_so_far="Can you get Dave to call me back? It's Bec, 0412 345 678.", have_number=True, card=card, diary=diary)
+        self.assertEqual(g.text, "Got it. I'll let Dave know you called. Thanks, Bec.")
+        # No double "got that" after the read-back.
+        g = guard("Got that. And your name?", caller="0433 987 654.", heard_so_far="How much for a leaking tap? Yeah alright, get him to call me.",
+                  card=card, diary=diary)
+        self.assertEqual(g.text, "So that's 0433 987 654. And your name?")
+        # Asked to recommend someone: she says she can't, and leaves it there.
+        g = guard("I'm sorry, but I can't recommend other businesses. However, Dave is currently on a job and will be back soon. Would you like him "
+                  "to call you back? Just let me have your name and number, and the issue you're having.",
+                  caller="Can you recommend a good electrician?", card=card, diary=diary)
+        self.assertEqual(g.text, "I'm sorry, but I can't recommend other businesses.")
+        # No "we can give you an idea" when there's no figure to give.
+        g = guard("We can give you an idea, but it really depends on what's needed. Can I get your name first?", caller="Come on, you must have some idea.",
+                  heard_so_far="Just give me a ballpark, mate, fifty bucks? A hundred?", card=card, diary=diary)
+        self.assertTrue(g.text.startswith("Sorry, I really can't guess a figure. It depends on the job."))
+        # Asked for a visit: free spots first, details after.
+        g = guard("Hi there, I'm Mila from Birch and Co Plumbing. Can I have your name please?",
+                  caller="Hello, I have a blocked drain. Could someone come out this week?", card=card, diary=diary)
+        self.assertIn("Tuesday at 9:30am, Thursday at 2:00pm or Friday at 11:00am", g.text)
+        # "We'll be there Friday" is a booking: not before the address and a yes to the full read-back.
+        g = guard("Thanks, Linda Park, number 0498 111 222. Your job is a blocked drain. We'll be there at 11:00am Friday. Sound good?",
+                  caller="My name is Linda Park and the number is 0498 111 222.",
+                  heard_so_far="Hello, I have a blocked drain. Could someone come out this week? Yes, Friday is fine.",
+                  last_reply="Great, Friday at 11:00am. Can I grab your name?", card=card, diary=diary)
+        self.assertEqual(g.fixes, ["booking"])
+        self.assertTrue(g.text.endswith("What's the address for the job?"))
+        # Her own "is that correct?" must carry the day and time too.
+        g = guard("0412 345 678. Got that. Shane, 14 Banksia Crescent, 0412 345 678. Is that correct?", caller="0412 345 678.",
+                  heard_so_far="G'day, hot water's carked it. Yeah nah, Tuesday's no good, I'm flat out. Nah yeah, Thursday works. It's Shane, 14 Banksia Crescent.",
+                  last_reply="Shane, 14 Banksia Crescent. Can I have your phone number?", card=card, diary=diary)
+        self.assertEqual(g.text, "Just to check: Thursday at 2:00pm, Shane on 0412 345 678, at 14 Banksia Crescent. Is that right?")
+        # Second-judge wobbles from rehearsal 3: two questions at once, a sales pitch, "mate" in a refusal, a chatbot goodbye.
+        g = guard("Thursday at 2:00pm then? What's your name and number so I can book that for you?", caller="Yeah nah, Tuesday's no good, I'm flat out.",
+                  heard_so_far="G'day, my hot water's carked it, reckon someone could come this arvo?", last_reply="x", card=card, diary=diary)
+        self.assertEqual(g.text, "Thursday at 2:00pm then?")
+        g = guard("No, we don't do gas fitting either. We focus on plumbing jobs like blocked drains, hot water systems, and leaks. Let me know how we can help!",
+                  caller="What about gas fitting?", heard_so_far="Do you guys do roofing as well?", card=card, diary=diary)
+        self.assertEqual(g.text, "Sorry, we don't do gas fitting either.")
+        g = guard("We don't give ballpark prices, mate. It depends on the job. Can I get your name and number so Dave can call you back?",
+                  caller="Just give me a ballpark, mate, fifty bucks? A hundred?", card=card, diary=diary)
+        self.assertNotIn("mate", g.text)
+        g = guard("Thanks for calling, and have a great day!", caller="No worries. Bye.", heard_so_far="Can you recommend a good electrician?", card=card, diary=diary)
+        self.assertEqual(g.text, "No problem at all. Thanks for calling Birch and Co Plumbing, bye.")
+        # Rehearsal 5: her own "Sounds good?" read-back becomes the full one; no repeated price line; no "That's the address."
+        g = guard("0412 345 678. Shane, we'll be at 14 Banksia Crescent at 2:00pm on Thursday. Sounds good?", caller="0412 345 678.",
+                  heard_so_far="Hot water's carked it. Yeah nah, Tuesday's no good. Nah yeah, Thursday works. It's Shane, 14 Banksia Crescent.",
+                  last_reply="14 Banksia Crescent. What's your phone number, Shane?", card=card, diary=diary)
+        self.assertEqual(g.text, "Just to check: Thursday at 2:00pm, Shane on 0412 345 678, at 14 Banksia Crescent. Is that right?")
+        g = guard("I can't give you a price for that. It really depends on what's needed. Can I get your name so Dave can call you back?",
+                  caller="Come on, you must have some idea.", heard_so_far="Just give me a ballpark, mate, fifty bucks? A hundred?",
+                  last_reply="I can't give you a price for that. It depends on the job. Can I grab your name so Dave can call you back?", card=card, diary=diary)
+        self.assertTrue(g.text.startswith("Sorry, I really can't guess a figure."))
+        g = guard("14 Banksia Crescent. That's the address. What's your phone number, Shane?", caller="It's Shane, 14 Banksia Crescent.", card=card, diary=diary)
+        self.assertNotIn("That's the address", g.text)
+        # Rehearsal 6: no call back for a job the shop doesn't do, and no "one moment please" (she can't put anyone on hold).
+        g = guard("Sorry, we don't do gas fitting either. Dave's on a job right now, but he'll call you back as soon as possible. Can I grab your name?",
+                  caller="What about gas fitting?", heard_so_far="Do you guys do roofing as well?", card=card, diary=diary)
+        self.assertEqual(g.text, "Sorry, we don't do gas fitting either.")
+        g = guard("Got it. I'll let Dave know it's about the quote. One moment please.", caller="Just tell him it's about the quote.",
+                  heard_so_far="Can you get Dave to call me back? It's Bec, 0412 345 678.", have_number=True, card=card, diary=diary)
+        self.assertEqual(g.text, "Got it. I'll let Dave know it's about the quote.")
+        # A time promise is not a booking: the deadline rule still handles it.
+        self.assertNotIn("booking", guard("He'll be there in under 30 mins.", caller="How long?", card=card, diary=diary).fixes)
 
     def test_spoken_numbers(self):
         from guard import spoken_numbers
@@ -710,7 +791,8 @@ class Guard(unittest.TestCase):
         g = guard("Dave will call you as soon as he's back in the office.", have_number=True)
         self.assertEqual(g.text, "Dave will call you as soon as possible.")
         g = guard("We don't give prices over the phone, mate.", caller="just give me a number")
-        self.assertEqual((g.fixes, g.text), (["slang"], "We don't give prices over the phone."))
+        self.assertEqual(g.text, "I can't give you a price for that.")     # no "mate", and no shop rule the card never gave
+        self.assertIn("slang", g.fixes)
         g = guard("No worries, mate.", caller="cheers mate")
         self.assertEqual(g.fixes, [])
         g = guard("Dave will be there within fifteen minutes, he'll be with you shortly.", caller="the pipe has burst", urgent=True, have_number=True)
@@ -734,7 +816,7 @@ class Guard(unittest.TestCase):
         out = self.g("Yes, there's a call-out fee of $90. Is there anything else I can help with?", "Is there a call-out fee?")
         self.assertEqual((out.fixes, out.text), (["sign_off"], "Yes, there's a call-out fee of $90."))
         out = self.g("Got it, Tuesday's not working. How about Thursday 2:00pm? That's a free spot in the diary. Sounds good?", "Yeah nah, Tuesday's no good.")
-        self.assertEqual(out.text, "Got it, Tuesday's not working. How about Thursday 2:00pm? Sounds good?")
+        self.assertEqual(out.text, "Got it, Tuesday's not working. How about Thursday 2:00pm?")   # one question (rehearsal 5)
 
     def test_call_speaks_through_the_guard(self):
         call = Call(card=self.card)
