@@ -678,6 +678,24 @@ class Guard(unittest.TestCase):
                   card=card, diary=diary)
         self.assertEqual(g.text, "Would you like to book an appointment?")
 
+    def test_live_09_slips_are_caught(self):
+        """Real replies from live round 9 (v24, 27 Nov 2026), with the second judge's findings."""
+        card = ShopCard.load(Path(__file__).resolve().parent.parent / "shop" / "examples" / "birch-and-co.json")
+        diary = [("Tuesday", "9:30am"), ("Thursday", "2:00pm"), ("Friday", "11:00am")]
+        g = guard("We don't do gutter cleaning, sorry.", caller="Do you do gutter cleaning?", card=card, diary=diary)
+        self.assertEqual(g.fixes, ["unknown_service"])
+        self.assertNotIn("unknown_service", guard("We don't do roofing, sorry.", caller="Do you guys do roofing as well?", card=card).fixes)
+        self.assertNotIn("unknown_service", guard("Yes, we fix leaking taps.", caller="Do you fix leaking taps?", card=card).fixes)
+        g = guard("What's the phone number for the job?", caller="22 Old Coach Road.", heard_so_far="There's water pouring through my ceiling!",
+                  card=card, diary=diary)
+        self.assertTrue(g.text.startswith("So that's 22 Old Coach Road."))
+        g = guard("The cost of the job depends on what needs fixing. Could you tell me what the issue is?",
+                  caller="And what would the whole job cost, roughly?", card=card, have_number=True)
+        self.assertTrue(g.text.endswith("Would you like Dave to call you with a proper price?"))
+        g = guard("Thanks for calling. If you need help with blocked drains, leaks, or hot water systems, we're your go-to team.",
+                  caller="No worries. Bye.", card=card)
+        self.assertEqual(g.text, "No worries. Thanks for calling Birch and Co Plumbing.")
+
     def test_spoken_numbers(self):
         from guard import spoken_numbers
         self.assertEqual(spoken_numbers("forty seven Ocean Street"), "47 Ocean Street")

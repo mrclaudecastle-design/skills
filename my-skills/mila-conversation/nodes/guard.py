@@ -883,6 +883,30 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         text = " ".join(kept + [f"{listed[0].upper() + listed[1:]}, and the rest depends on the job. "
                                 f"Would you like {owner} to call you with a proper price?"])
 
+    # 2c. A service that isn't on the card either way: she doesn't know, so she offers a call back.
+    asked_service = re.search(r"\bdo (?:you|ya|youse)(?: guys| blokes)? (?:do|offer|handle|fix|clean|repair|install|look at)\s+([^?.!]{3,40})", caller, re.I)
+    if asked_service:
+        stop = {"a", "an", "the", "any", "some", "your", "my", "of", "and", "or", "as", "well", "too", "also", "work", "jobs", "job", "do"}
+        words = {w for w in re.findall(r"[a-z]+", asked_service.group(1).lower()) if w not in stop}
+        known = " ".join(str(x).lower() for x in list(a.get("services") or []) + list(a.get("not_offered") or []))
+        if words and not any(w in known or (w.endswith("s") and w[:-1] in known) for w in words):
+            sure = re.search(r"\b(?:we (?:don't|do not|do|can|can't|cannot|offer|handle)|yes|yep|yeah|no,|sorry, (?:we|no))\b", text, re.I)
+            if sure and not re.search(r"\bnot sure\b|\bcheck\b", text, re.I):
+                fixes.append("unknown_service")
+                text = f"I'm not sure about that one. I can have {owner} call you back to check. Would that help?"
+
+    # 2d. The cost of a job itself: offer the call back the card promises, rather than quizzing the caller.
+    job_cost = re.search(r"\b(?:whole job|job cost|cost of the job|all up|roughly|ballpark|how much (?:would|will) (?:it|the job))\b", caller, re.I)
+    if job_cost and a.get("prices") is not None and not re.search(r"\b(?:call|ring)\b", text, re.I):
+        sent = [x for x in _sentences(text) if not x.endswith("?")]
+        fixes.append("price_call_back")
+        text = " ".join(sent[:2] + [f"Would you like {owner} to call you with a proper price?"])
+
+    # 2e. After a goodbye: a short, warm goodbye, no sales pitch.
+    if re.search(r"\b(?:bye|goodbye|see ya|hooroo|catch ya)\b", caller, re.I) and len(text.split()) > 10:
+        fixes.append("goodbye")
+        text = f"No worries. Thanks for calling {a.get('shop_name', 'us')}."
+
     # 3a. Never say the shop doesn't work a day it does.
     days_open = {str(d).lower() for d in a.get("open_days", [])}
     closed_claim = re.compile(r"\b(?:don't|do not|aren't|are not|can't|cannot|never)\s+(?:do|open|work|come out|available|go out)?\s*"
@@ -1172,6 +1196,17 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
             rest = [x for x in _sentences(text) if not ((ACK.match(x) and len(x.split()) <= 4) or NOTED.match(x))]
             text = (f"So that's {name} on {said[-1]}. " if name else f"So that's {said[-1]}. ") + " ".join(rest)
             text = text.strip()
+
+    # 1b. Read back an address the caller just gave, with every number in it.
+    addr_m = list(ADDRESS_SAID.finditer(_mask(caller)))
+    if addr_m:
+        addr = caller[addr_m[-1].start():addr_m[-1].end()].strip(" ,")
+        nums = re.findall(r"\d+", addr)
+        if nums and not all(re.search(r"(?<!\d)" + n + r"(?!\d)", spoken_numbers(text)) for n in nums):
+            fixes.append("read_back")
+            nice = re.sub(r"\b([a-z])", lambda m: m.group(1).upper(), addr) if addr.islower() else addr
+            rest = [x for x in _sentences(text) if not ((ACK.match(x) and len(x.split()) <= 4) or NOTED.match(x))]
+            text = (f"So that's {nice}. " + " ".join(rest)).strip()
 
     # 5d. A visit is never "as soon as possible": offer a real spot instead. And say "as soon as" once.
     visit = re.compile(r"\b(?:come|come out|be there|be out|pop (?:over|round)|head over|get out|send someone|arrange someone)\b", re.I)
