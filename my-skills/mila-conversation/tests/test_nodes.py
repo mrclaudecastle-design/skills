@@ -272,8 +272,8 @@ class Guard(unittest.TestCase):
 
     def test_run_02_misses_are_caught(self):
         out = self.g("I'll pass your call to Dave.", "Can you get Dave to call me back? It's Bec, 0412 345 678.")
-        self.assertEqual(out.fixes, ["read_back"])
-        self.assertEqual(out.text, "So that's Bec on 0412 345 678. I'll pass your call to Dave.")
+        self.assertEqual(out.fixes, ["wording", "read_back"])      # "pass your call" can sound like a transfer (unseen calls, 28 Nov)
+        self.assertEqual(out.text, "So that's Bec on 0412 345 678. I'll let Dave know you called.")
         out = self.g("That's an emergency. I'll get Dave to call you back now.", "There's water pouring through my ceiling!")
         self.assertEqual(out.fixes, ["need_number"])
         self.assertIn("best number", out.text)
@@ -764,7 +764,10 @@ class Guard(unittest.TestCase):
         g = guard("I can't give you a price for that. It really depends on what's needed. Can I get your name so Dave can call you back?",
                   caller="Come on, you must have some idea.", heard_so_far="Just give me a ballpark, mate, fifty bucks? A hundred?",
                   last_reply="I can't give you a price for that. It depends on the job. Can I grab your name so Dave can call you back?", card=card, diary=diary)
-        self.assertTrue(g.text.startswith("Sorry, I really can't guess a figure."))
+        self.assertEqual(g.text, "Sorry, I really can't guess a figure. Only Dave can price the job. Can I grab your name so Dave can call you back?")
+        g = guard("We charge a call-out fee of $90, and the cost of the job itself depends on the situation. Would you like me to book Dave to come out and have a look?",
+                  caller="How much do you reckon it'd be to fix a leaking tap?", card=card, diary=diary)
+        self.assertTrue(g.text.endswith("Would you like Dave to call you back about the price?"))
         g = guard("14 Banksia Crescent. That's the address. What's your phone number, Shane?", caller="It's Shane, 14 Banksia Crescent.", card=card, diary=diary)
         self.assertNotIn("That's the address", g.text)
         # Rehearsal 6: no call back for a job the shop doesn't do, and no "one moment please" (she can't put anyone on hold).
@@ -774,6 +777,23 @@ class Guard(unittest.TestCase):
         g = guard("Got it. I'll let Dave know it's about the quote. One moment please.", caller="Just tell him it's about the quote.",
                   heard_so_far="Can you get Dave to call me back? It's Bec, 0412 345 678.", have_number=True, card=card, diary=diary)
         self.assertEqual(g.text, "Got it. I'll let Dave know it's about the quote.")
+        # Unseen calls (28 Nov): gas smell, an AI question, a booking she can't see, a day question, a name said bare, a street with no type.
+        g = guard("That's urgent. Can I have your address, please?", caller="I can smell gas in the kitchen, can you send someone?", card=card, diary=diary)
+        self.assertTrue(g.text.startswith("If you can smell gas, please get everyone outside") and "can't come out" in g.text)
+        g = guard("How can I help you today?", caller="Am I talking to a real person?", card=card, diary=diary)
+        self.assertTrue(g.text.startswith("I'm Mila, an AI receptionist."))
+        g = guard("So that's Shane on 0412 345 678. I've found your booking for Thursday. Would you like to cancel it now?", caller="It's Shane, 0412 345 678.",
+                  heard_so_far="I need to cancel my booking for Thursday.", card=card, diary=diary)
+        self.assertNotIn("found your booking", g.text)
+        self.assertIn("I can't change bookings from here", g.text)
+        g = guard("Nope, we're closed on Saturdays. Can I grab your name so Dave can call you back?", caller="Do you do Saturdays?",
+                  heard_so_far="What hours do you work?", card=card, diary=diary)
+        self.assertEqual(g.text, "Nope, we're closed on Saturdays.")
+        g = guard("0400 123 456. Is that correct?", caller="0400 123 456.", heard_so_far="Need someone for a blocked sink, Friday if you can. Friday's good. Mark, 22 Ocean, Bondi.",
+                  last_reply="Thanks, Mark. That's Friday at 11:00am, 22 Ocean, Bondi. Is that correct?", card=card, diary=diary)
+        self.assertEqual(g.text, "Just to check: Friday at 11:00am, Mark on 0400 123 456, at 22 Ocean, Bondi. Is that right?")
+        g = guard("Okay, I'll make sure Dave calls you right away.", caller="Fine. Just get Dave to call me. It's Rob, 0499 876 543.", card=card, diary=diary)
+        self.assertNotIn("right away", g.text)
         # A time promise is not a booking: the deadline rule still handles it.
         self.assertNotIn("booking", guard("He'll be there in under 30 mins.", caller="How long?", card=card, diary=diary).fixes)
 

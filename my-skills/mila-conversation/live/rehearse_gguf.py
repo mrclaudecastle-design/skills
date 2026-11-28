@@ -28,6 +28,7 @@ from guard import PHONE, guard, is_urgent   # noqa: E402
 from lingo import understand                # noqa: E402
 from shop_card import ShopCard              # noqa: E402
 from live_call_test import CALLS, DIARY     # noqa: E402  (one list of calls for both)
+from more_calls import MORE_CALLS           # noqa: E402
 
 
 def chatml(messages) -> str:
@@ -44,6 +45,7 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=120)
     ap.add_argument("--threads", type=int, default=os.cpu_count())
     ap.add_argument("--only", default="", help="comma-separated call names to play (default: all 12)")
+    ap.add_argument("--set", choices=["main", "more"], default="main", help="main = the 12 scored calls; more = 12 unseen ones")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -57,7 +59,7 @@ def main():
     t0 = time.perf_counter()
     llm = Llama(model_path=args.model, n_ctx=4096, n_threads=args.threads, verbose=False, seed=0)
     load_s = time.perf_counter() - t0
-    calls = {k: v for k, v in CALLS.items() if not args.only or k in args.only.split(",")}
+    calls = {k: v for k, v in (CALLS if args.set == "main" else MORE_CALLS).items() if not args.only or k in args.only.split(",")}
 
     results, fixes, lines = [], Counter(), [f"Model: {args.model}  load: {load_s:.1f}s  (rehearsal, timings don't count)", "", system, ""]
     for name, caller_lines in calls.items():
