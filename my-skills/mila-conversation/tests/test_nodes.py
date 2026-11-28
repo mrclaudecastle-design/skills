@@ -820,6 +820,18 @@ class Guard(unittest.TestCase):
                   last_reply="Great, Friday at 11:00am. What's your name?", card=card, diary=diary)
         self.assertEqual(g.fixes, ["booking"])
         self.assertTrue(g.text.endswith("What's the address for the job?"))
+        # Unseen calls, round 3: out-of-area address read back, name before number, what a call back is about, acknowledge the problem.
+        g = guard("Thanks, Mark.", caller="Mark, 22 Ocean, Bondi.", heard_so_far="Need someone for a blocked sink, Friday if you can. Friday's good.", card=card, diary=diary)
+        self.assertTrue(g.text.startswith("So that's 22 Ocean, Bondi. We cover"))
+        g = guard("I'm sorry you're having trouble. What's the best number to reach you on?", caller="This is ridiculous, nobody ever answers, are you useless?",
+                  card=card, diary=diary)
+        self.assertTrue(g.text.endswith("Can I grab your name?"))
+        g = guard("So that's Rob on 0499 876 543. I'll let Dave know you're waiting.", caller="Fine. Just get Dave to call me. It's Rob, 0499 876 543.",
+                  heard_so_far="This is ridiculous, nobody ever answers, are you useless?", card=card, diary=diary)
+        self.assertTrue(g.text.endswith("And what's it about?"))
+        g = guard("Can I get your phone number?", caller="It's coming up out of the drain in the yard.",
+                  heard_so_far="Um, hi, yeah, I've got a sort of a problem with, like, water?", last_reply="Can I get your name?", card=card, diary=diary)
+        self.assertEqual(g.text, "Sorry to hear that. Can I get your phone number?")
         # A time promise is not a booking: the deadline rule still handles it.
         self.assertNotIn("booking", guard("He'll be there in under 30 mins.", caller="How long?", card=card, diary=diary).fixes)
 

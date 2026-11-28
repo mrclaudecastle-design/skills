@@ -493,7 +493,7 @@ def is_urgent(text: str) -> bool:
 
 
 NAME_LOWER = re.compile(r"\b(?:it's|its|it is|this is|my name is|my name's|name's)\s+([a-z]{2,})(?=\s*(?:[,.!?]|$|\s+(?:here|calling|speaking)\b))", re.I)
-NOT_NAME_WORDS = {"unit", "flat", "number", "apartment", "level", "lot", "shop", "suite", "me", "just", "the", "about", "urgent", "leaking", "broken", "fine", "good", "okay", "ok", "here", "now", "today",
+NOT_NAME_WORDS = {"ridiculous", "terrible", "annoying", "crazy", "insane", "unacceptable", "hopeless", "useless", "awful", "important", "serious", "bad", "great", "unit", "flat", "number", "apartment", "level", "lot", "shop", "suite", "me", "just", "the", "about", "urgent", "leaking", "broken", "fine", "good", "okay", "ok", "here", "now", "today",
                   "tomorrow", "true", "right", "correct", "wrong", "busy", "yes", "no", "not", "really", "that", "this", "it"}
 
 
@@ -1502,7 +1502,9 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
             said_ph = [m.group(0) for m in PHONE.finditer(caller)]
             text = (f"So that's {said_ph[-1]}. " if said_ph else "") + f"I'll ask {owner} to call you about {suburb}."
         else:
-            text = (f"We cover {area}, so I'm not sure we get out to {suburb}. "
+            addr_txt = sub_m[-1].group(0).strip(" ,")
+            back = f"So that's {addr_txt}. " if sub_m[-1].group(0) in caller else ""
+            text = (f"{back}We cover {area}, so I'm not sure we get out to {suburb}. "
                     f"I can have {owner} call you to check. Would that help?")
 
     # 12i. No near-repeat of what she said last turn (a read-back of something new is fine).
@@ -1510,7 +1512,8 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         said_before = [set(re.findall(r"[a-z']+", x.lower())) for x in _sentences(last_reply)]
         def near(x):
             w = set(re.findall(r"[a-z']+", x.lower()))
-            return len(w) >= 5 and not re.search(r"\d", x) and any(len(w & b) / max(1, len(w | b)) >= 0.6 for b in said_before)
+            bare = TIME_RANGE.sub(" ", x) if TIME_RANGE.search(last_reply) else x     # working hours said again count as a repeat
+            return len(w) >= 5 and not re.search(r"\d", bare) and any(len(w & b) / max(1, len(w | b)) >= 0.6 for b in said_before)
         sent = _sentences(text)
         kept = [x for x in sent if x.endswith("?") or not near(x)]
         if kept and kept != sent:
@@ -1536,6 +1539,28 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
         if len(times) == 1 and (SLOT.search(last_reply or "") or re.search(d_, last_reply or "", re.I)):
             fixes.append("read_back")
             text = f"Great, {took.group(1).capitalize()} at {times[0]}. " + re.sub(r"^(?:great|okay|ok|perfect|lovely|sure)[,.!]?\s*", "", text, flags=re.I)
+
+    # 12l. Name first: a lone ask for the number when the name isn't in yet becomes the name ask (not on urgent calls).
+    sent = _sentences(text)
+    if not urgent and not have_name and caller.strip() and sent and sent[-1].endswith("?") and re.search(r"\b(?:phone )?number\b|\bmobile\b", sent[-1], re.I) \
+            and not re.search(r"\bname\b", sent[-1], re.I) and not re.search(r"\bname\b", last_reply or "", re.I):
+        sent[-1] = "Can I grab your name?" if not wants_call_back else f"Can I grab your name so {owner} can call you back?"
+        fixes.append("one_ask")
+        text = " ".join(sent)
+
+    # 12m. A call back with name and number in, but nothing on what it's about: ask, once.
+    if wants_call_back and not urgent and have_name and have_phone and heard_so_far.strip() and not TOPIC.search(call_so_far) \
+            and not text.rstrip().endswith("?") and "about" not in (last_reply or "").lower() and "area" not in fixes:
+        text = text.rstrip() + " And what's it about?"
+        fixes.append("one_ask")
+
+    # 12n. The caller described a problem and she only fires a question back: acknowledge it first.
+    sent = _sentences(text)
+    if len(sent) == 1 and sent[0].endswith("?") and not urgent and not re.search(r"\d", caller) and not caller.rstrip().endswith("?") \
+            and re.search(r"\b(?:water|leak\w*|drip\w*|block\w*|burst|flood\w*|overflow\w*|broken|carked|playing up|won't|isn't working|not working|coming up)\b", caller, re.I) \
+            and not re.search(r"\b(?:sorry|oh no|that's no good|not fun)\b", last_reply or "", re.I):
+        text = "Sorry to hear that. " + text
+        fixes.append("manners")
 
     # 12d. Whatever is left, one question per reply: the first one stays.
     sent = _sentences(text)
