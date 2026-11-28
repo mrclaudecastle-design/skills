@@ -273,7 +273,7 @@ class Guard(unittest.TestCase):
     def test_run_02_misses_are_caught(self):
         out = self.g("I'll pass your call to Dave.", "Can you get Dave to call me back? It's Bec, 0412 345 678.")
         self.assertEqual(out.fixes, ["wording", "read_back"])      # "pass your call" can sound like a transfer (unseen calls, 28 Nov)
-        self.assertEqual(out.text, "So that's Bec on 0412 345 678. I'll let Dave know you called.")
+        self.assertEqual(out.text, "So that's Bec on 0412 345 678. I'll ask Dave to call you back.")
         out = self.g("That's an emergency. I'll get Dave to call you back now.", "There's water pouring through my ceiling!")
         self.assertEqual(out.fixes, ["need_number"])
         self.assertIn("best number", out.text)
@@ -789,11 +789,37 @@ class Guard(unittest.TestCase):
         g = guard("Nope, we're closed on Saturdays. Can I grab your name so Dave can call you back?", caller="Do you do Saturdays?",
                   heard_so_far="What hours do you work?", card=card, diary=diary)
         self.assertEqual(g.text, "Nope, we're closed on Saturdays.")
-        g = guard("0400 123 456. Is that correct?", caller="0400 123 456.", heard_so_far="Need someone for a blocked sink, Friday if you can. Friday's good. Mark, 22 Ocean, Bondi.",
-                  last_reply="Thanks, Mark. That's Friday at 11:00am, 22 Ocean, Bondi. Is that correct?", card=card, diary=diary)
-        self.assertEqual(g.text, "Just to check: Friday at 11:00am, Mark on 0400 123 456, at 22 Ocean, Bondi. Is that right?")
+        from shop_card import ShopCard as _SC
+        wide = _SC({**card.given, "area": "Northern Beaches, Freshwater and the North Shore"})
+        g = guard("0400 123 456. Is that correct?", caller="0400 123 456.", heard_so_far="Need someone for a blocked sink, Friday if you can. Friday's good. Mark, 22 Ocean, Freshwater.",
+                  last_reply="Thanks, Mark. That's Friday at 11:00am, 22 Ocean, Freshwater. Is that correct?", card=wide, diary=diary)
+        self.assertEqual(g.text, "Just to check: Friday at 11:00am, Mark on 0400 123 456, at 22 Ocean, Freshwater. Is that right?")
+        # A suburb the card's area doesn't name: check, don't book (second judge, unseen calls).
+        g = guard("Thanks, Mark. That's Friday at 11:00am, 22 Ocean, Bondi. Is that correct?", caller="Mark, 22 Ocean, Bondi.",
+                  heard_so_far="Need someone for a blocked sink, Friday if you can. Friday's good.", card=card, diary=diary)
+        self.assertIn("not sure we get out to Bondi", g.text)
+        g = guard("Just to check: Friday at 11am. Is that right?", caller="0400 123 456.", heard_so_far="Friday's good. Mark, 22 Ocean, Bondi.",
+                  last_reply="We cover Northern Beaches and the North Shore, so I'm not sure we get out to Bondi. I can have Dave call you to check. Would that help?",
+                  card=card, diary=diary)
+        self.assertEqual(g.text, "So that's 0400 123 456. I'll ask Dave to call you about Bondi.")
+        # Near-repeat, two asks in a statement, a 6pm ask, and saying back the spot the caller took.
+        g = guard("No worries, Jess. I'll make sure Dave gets that number and rings you back as soon as possible.", caller="Sorry, I mean 0422 555 081.",
+                  heard_so_far="It's Jess, 0422 555 018.", last_reply="So that's Jess on 0422 555 018. I'll make sure Dave rings you back as soon as possible.", card=card, diary=diary)
+        self.assertNotIn("rings you back", g.text)
+        g = guard("Sure, I'll need your name and phone number so Dave can sort it out.", caller="I need to cancel my booking for Thursday.", card=card, diary=diary)
+        self.assertEqual(g.text, "Can I grab your name?")
+        g = guard("Sure, 6pm tonight works.", caller="Can someone come at 6pm tonight?", card=card, diary=diary)
+        self.assertTrue(g.text.startswith("Sorry, we work 7am to 4pm, so 6pm isn't possible."))
+        g = guard("What's your name?", caller="Yes, Friday is fine.", heard_so_far="Could someone come out this week?",
+                  last_reply="The next free spots are Tuesday at 9:30am, Thursday at 2:00pm or Friday at 11:00am. Which suits?", card=card, diary=diary)
+        self.assertEqual(g.text, "Great, Friday at 11:00am. What's your name?")
         g = guard("Okay, I'll make sure Dave calls you right away.", caller="Fine. Just get Dave to call me. It's Rob, 0499 876 543.", card=card, diary=diary)
         self.assertNotIn("right away", g.text)
+        g = guard("Thanks, Linda Park, number 0498 111 222. Your job is booked for Friday at 11:00am. Is that okay?",
+                  caller="My name is Linda Park and the number is 0498 111 222.", heard_so_far="Could someone come out this week? Yes, Friday is fine.",
+                  last_reply="Great, Friday at 11:00am. What's your name?", card=card, diary=diary)
+        self.assertEqual(g.fixes, ["booking"])
+        self.assertTrue(g.text.endswith("What's the address for the job?"))
         # A time promise is not a booking: the deadline rule still handles it.
         self.assertNotIn("booking", guard("He'll be there in under 30 mins.", caller="How long?", card=card, diary=diary).fixes)
 

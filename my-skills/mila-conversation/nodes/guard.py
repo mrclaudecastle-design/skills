@@ -159,7 +159,8 @@ BOOKED = re.compile(r"\b(?:i've|i have|we've|we have)\s+(?:booked|got you (?:dow
                     r"\bi'll (?:book|lock|pop) (?:you|that|it) in\b|\b(?:your )?booking(?:'s| is) (?:confirmed|locked in|all set)\b|"
                     r"\b(?:locked|booked) (?:it|that|you) in\b|\ball booked\b|\bconfirmed your booking\b|\b(?:got|have) you (?:booked|down|in)\b|\byou're (?:down|in) for\b|"
                     r"\b(?:we'll|we will|he'll|he will|she'll|she will|they'll|they will|someone will|someone'll)\s+(?:be (?:there|out|round|over)|see you)\s+(?:at\s+|on\s+|this\s+|next\s+)?(?:\d{1,2}(?::\d{2})?\s?[ap]\.?m|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
-                    r"\b(?:we'll|we will) (?:book|lock|pop) (?:you|that|it) in\b", re.I)
+                    r"\b(?:we'll|we will) (?:book|lock|pop) (?:you|that|it) in\b|"
+                    r"\b(?:your (?:job|visit|appointment|booking)|you|that|it|this)(?:'s|'re| is| are)? (?:now |all )?(?:booked|scheduled|confirmed|set|locked) (?:in )?(?:for|on)\b", re.I)
 CONFIRM_Q = re.compile(r"\b(?:is that (?:all )?(?:right|correct|okay|ok|good)|did i get (?:that|all that|everything) right|have i got that right|"
                        r"does that (?:sound|look) (?:right|good|okay)|sounds? (?:good|right|okay)|all correct|shall i (?:book|lock|pop) (?:that|it|you) in)\b[^.!?]*\?\s*$", re.I)
 YES = re.compile(r"^\W*(?:yes|yeah|yep|yup|correct|that's right|that's it|spot on|perfect|sounds good|sure|ok|okay|all good|"
@@ -758,7 +759,9 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     # 7b. Wording the card asks for: no "pass your message on" (there may be none), no booking a call back.
     worded = re.sub(r"\bpass (?:on )?(?:your|the) message(?: on)?(?: to (\w+))?", lambda m: f"let {m.group(1) or owner} know you called", text, flags=re.I)
     worded = re.sub(r"\bpass your message (?:on )?to (\w+)", r"let \1 know you called", worded, flags=re.I)
-    worded = re.sub(r"\bpass (?:on )?your call (?:on |through )?to (\w+)", r"let \1 know you called", worded, flags=re.I)
+    worded = re.sub(r"\bpass (?:on )?your call (?:on |through )?to (\w+)", r"ask \1 to call you back", worded, flags=re.I)
+    # "make sure he gets your message straight away": there may be no message, and no promise of when
+    worded = re.sub(r"\bmake sure (?:he|she|they|\w+) gets? (?:your|the) message(?: straight away| right away| asap| now)?", f"let {owner} know you called", worded, flags=re.I)
     worded = re.sub(r"\b(?:to|so i can) (?:check|look up|find|pull up) your (?:booking|appointment)", f"so {owner} can sort it out", worded, flags=re.I)
     worded = re.sub(r"^(?:hi there|hello there|hi|hello|g'day),\s+(?=[a-z])", "", worded, flags=re.I)        # the greeting already said hello
     worded = worded[:1].upper() + worded[1:]
@@ -1094,6 +1097,20 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
             d, t = next(((d, t) for d, t in diary if d.lower() not in refused), diary[0])
             asked = SLOT.search(caller)     # tell the caller why, if they asked for a spot that isn't free
             why = f"Sorry, {asked.group(1).capitalize()} at {asked.group(2)} isn't free. " if asked else ""
+            clock = CLOCK.search(caller)
+            if not asked and clock and a.get("open_hours") and not re.search(re.escape(clock.group(0)), a["open_hours"], re.I):
+                ct_ = re.findall(_T, a["open_hours"])
+                tt = _norm_time(clock.group(0))
+                try:
+                    h = int(tt.split(":")[0]) % 12 + (12 if tt.endswith("pm") else 0)
+                    o = _norm_time(ct_[0]); c = _norm_time(ct_[-1])
+                    oh = int(o.split(":")[0]) % 12 + (12 if o.endswith("pm") else 0)
+                    ch = int(c.split(":")[0]) % 12 + (12 if c.endswith("pm") else 0)
+                    if h < oh or h >= ch:
+                        why = f"Sorry, we work {a['open_hours']}, so {clock.group(0).strip()} isn't possible. "
+                        asked = clock
+                except (ValueError, IndexError):
+                    pass
             spots = [f"{d_} at {t_}" for d_, t_ in diary if d_.lower() not in refused][:3]
             if asked and len(spots) > 1:     # they named a spot that isn't free: give them the ones that are
                 text = f"{why}The free spots I have are {', '.join(spots[:-1])} or {spots[-1]}. Would one of those suit?"
@@ -1467,11 +1484,58 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     if re.search(r"\b(?:cancel|reschedul\w*|move|change)\b[^.!?]{0,20}\b(?:booking|appointment|job)\b", call_so_far, re.I) \
             and "cancel" not in {str(x).lower() for x in (a.get("abilities") or [])} and have_name and have_phone \
             and "change bookings from here" not in (last_reply or ""):
-        kept = [x for x in _sentences(text) if not x.endswith("?") and not re.search(r"\b(?:cancel|reschedul|move)\w*", x, re.I)]
+        kept = [x for x in _sentences(text) if not x.endswith("?") and not re.search(r"\b(?:cancel|reschedul|move)\w*", x, re.I)
+                and not offered_slots(x) and not re.search(r"\bfree spots?\b", x, re.I)]
         line = f"I can't change bookings from here, but I'll pass it to {owner} to sort out."
         text = " ".join(dict.fromkeys(kept + [line]))
         if "cant_do" not in fixes:
             fixes.append("cant_do")
+
+    # 12h. A suburb the card's area doesn't name: she can't know it's covered, so she checks rather than books.
+    area = str(a.get("area") or "")
+    sub_m = list(re.finditer(r"(?<![\d/])\d{1,4}[a-z]?\s+(?:[A-Z][\w']+\s+){0,3}[A-Za-z']*,\s*((?-i:[A-Z][a-z']+)(?: (?-i:[A-Z][a-z']+))?)(?=\s*[.!?]|\s*$)",
+                             heard_so_far + " " + caller))
+    suburb = sub_m[-1].group(1) if sub_m else ""
+    if area and suburb and suburb.lower() not in area.lower() and suburb.lower() not in WEEK and not urgent:
+        fixes.append("area")
+        if "not sure we get out to" in (last_reply or ""):      # already said: take the number for the check, don't book
+            said_ph = [m.group(0) for m in PHONE.finditer(caller)]
+            text = (f"So that's {said_ph[-1]}. " if said_ph else "") + f"I'll ask {owner} to call you about {suburb}."
+        else:
+            text = (f"We cover {area}, so I'm not sure we get out to {suburb}. "
+                    f"I can have {owner} call you to check. Would that help?")
+
+    # 12i. No near-repeat of what she said last turn (a read-back of something new is fine).
+    if last_reply:
+        said_before = [set(re.findall(r"[a-z']+", x.lower())) for x in _sentences(last_reply)]
+        def near(x):
+            w = set(re.findall(r"[a-z']+", x.lower()))
+            return len(w) >= 5 and not re.search(r"\d", x) and any(len(w & b) / max(1, len(w | b)) >= 0.6 for b in said_before)
+        sent = _sentences(text)
+        kept = [x for x in sent if x.endswith("?") or not near(x)]
+        if kept and kept != sent:
+            fixes.append("repeat")
+            text = " ".join(kept)
+
+    # 12j. "I'll need your name and number" is two asks too: ask for the first one missing.
+    sent = _sentences(text)
+    for i, x in enumerate(sent):
+        if not x.endswith("?") and re.search(r"\b(?:i(?:'ll| will)? need|can you (?:give|tell) me|i just need)\b[^.!?]*\byour name\b[^.!?]*\b(?:number|phone)\b", x, re.I):
+            sent[i] = "Can I grab your name?" if not have_name else ("What's the best number to reach you on?" if not have_phone else "")
+            if "one_ask" not in fixes:
+                fixes.append("one_ask")
+            text = " ".join(y for y in sent if y)
+            break
+
+    # 12k. The caller just took a spot: say it back, day and time, before the next ask.
+    took = re.search(DAY + r"(?:'s|\s+is|\s+works|\s+suits|\s+would be)?\s*(?:fine|good|great|perfect|works|suits)?", caller, re.I)
+    if diary and took and (YES.search(caller) or re.search(r"\b(?:fine|good|great|perfect|works|suits)\b", caller, re.I)) \
+            and not SLOT.search(text) and "area" not in fixes and not urgent:
+        d_ = took.group(1).lower()
+        times = [t_ for dd, t_ in diary if dd.lower() == d_ and d_ not in refused]
+        if len(times) == 1 and (SLOT.search(last_reply or "") or re.search(d_, last_reply or "", re.I)):
+            fixes.append("read_back")
+            text = f"Great, {took.group(1).capitalize()} at {times[0]}. " + re.sub(r"^(?:great|okay|ok|perfect|lovely|sure)[,.!]?\s*", "", text, flags=re.I)
 
     # 12d. Whatever is left, one question per reply: the first one stays.
     sent = _sentences(text)
@@ -1485,7 +1549,7 @@ def guard(reply: str, caller: str = "", card=None, diary: list[tuple[str, str]] 
     same = re.fullmatch(r"(?:Sorry, .*? isn't free\. )?The next free spot is (\w+) at ([\w:]+)\. Would that suit\?", text)
     if same and last_reply and re.sub(r"\W+", " ", text).lower() in re.sub(r"\W+", " ", last_reply).lower():
         fixes.append("repeat")
-        text = f"{same.group(1)} at {same.group(2)} is the earliest I have. Would that suit?"
+        text = f"{same.group(1)} at {same.group(2)} is the first free spot I have. Would that suit?"
 
     # 13. Urgent: once address and number are in, say what the card promises ("Dave will ring within fifteen minutes").
     promise_m = DEADLINE.search(a.get("emergencies", "") or "")
